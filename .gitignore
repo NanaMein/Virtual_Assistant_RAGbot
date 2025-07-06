@@ -1,0 +1,75 @@
+# PyCharm related files
+.idea/
+.idea/workspace.xml
+*.iml
+
+# Python bytecode and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Temporary files and directories
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+*.bak
+*.asv
+*.egg-info/
+build/
+dist/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Poetry related (if you're using Poetry for dependency management)
+poetry.lock
+
+# Environment variables (if you have a .env file)
+.env
+
+# Specific to CrewAI (you might have some local agent brain files or outputs)
+crewai_cache/  # Or whatever directory you use for CrewAI's internal caching
+outputs/       # Or a directory where your CrewAI agents might save output
+
+# ASP.NET Core related files
+bin/
+obj/
+*.csproj.user
+*.sln.docstates
+_ReSharper.*/
+*.DotSettings
+*.DotSettings.user
+appsettings.Development.json
+launchSettings.json
+Properties/launchSettings.json
+publish/
+
+# NuGet related
+packages/
+*.nupkg
+*.snupkg
+
+# Node.js and npm (if your ASP.NET Core app uses frontend frameworks)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Add any other project-specific files or directories you want to ignore
+# For example:
+# my_local_config.yaml
+# data/large_local_dataset/
