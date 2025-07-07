@@ -4,7 +4,6 @@ import asyncio
 from collections import deque
 from functools import lru_cache
 from typing import Deque, Type, Optional, List
-
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from llama_index.core.storage.chat_store.base_db import MessageStatus
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -19,9 +18,7 @@ from llama_index.core.memory.memory import Memory
 from llama_index.core.workflow import Context
 from llama_index.llms.groq import Groq
 from datetime import datetime, timezone, timedelta
-import pytz
 from crewai.flow import Flow, start, listen, router, or_, and_, persist
-# from llama_index.core.base.llms.types import ChatMessage  # , TextBlock
 from llama_index.core.base.llms.base import ChatMessage  # schema import ChatMessage
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -64,7 +61,20 @@ class CrewChatbot:
             verbose=True,
         ) # type: ignore[index]
 
+    @task
+    def task(self):
+        return Task(
+            config=self.task_config["task"],
+
+        )
+
     @crew
     def crew(self):
+        return Crew(
+            agents=self.agents,  # type: ignore[index]
+            tasks=self.tasks,  # type: ignore[index]
+            process=Process.sequential,
+            planning=True
+        )
 
 
