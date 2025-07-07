@@ -39,3 +39,24 @@ from pymilvus.exceptions import MilvusException
 
 
 load_dotenv()
+
+
+class FlowStateHandler(BaseModel):
+    user_input_message: str = ""
+    user_input_id: str = ""
+
+
+class AgenticWorkflow(Flow[FlowStateHandler]):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @start()
+    async def start1(self):
+        await asyncio.sleep(2)
+
+
+    @listen(start1)
+    async def listen1(self):
+        await asyncio.sleep(2)
+        return "Ok"

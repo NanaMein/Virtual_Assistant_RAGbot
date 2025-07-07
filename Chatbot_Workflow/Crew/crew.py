@@ -3,7 +3,9 @@
 import asyncio
 from collections import deque
 from functools import lru_cache
-from typing import Deque, Type, Optional
+from typing import Deque, Type, Optional, List
+
+from crewai.agents.agent_builder.base_agent import BaseAgent
 from llama_index.core.storage.chat_store.base_db import MessageStatus
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
@@ -45,6 +47,8 @@ class CrewChatbot:
 
     for_cache = TTLCache(ttl=3600, maxsize=100)
     vector_cache = TTLCache(ttl=300, maxsize=10)
+    agents = List[BaseAgent]
+    tasks = List[Task]
 
     def __init__(self, user_id: str):
         self.user_id: str = user_id
@@ -59,4 +63,8 @@ class CrewChatbot:
             config=self.agent_config["research_agent"], # type: ignore[index]
             verbose=True,
         ) # type: ignore[index]
+
+    @crew
+    def crew(self):
+
 
