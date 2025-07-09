@@ -43,31 +43,44 @@ class PersonalityVectorClass:
         self.user_id: str = user_input_id
 
     def activate_vector(self):
-        return self._vector_store(
-            user_id=self.user_id
-        )
+        max_retries = 3
+        attempt = 0
+
+        while attempt < max_retries:
+            vector_store = self._vector_store(user_id=self.user_id)
+            if vector_store:
+                return vector_store
+
+            attempt += 1
+            print(f"[Retry] Attempt {attempt} failed for user_id: {self.user_id}")
+
+        print(f"[Error] All {max_retries} attempts failed for user_id: {self.user_id}")
+        return None
 
     def _vector_store(self, user_id:str):
         if user_id in self.vector_cache:
             return self.vector_cache[user_id]
+        try:
+            vector_store = MilvusVectorStore(
+                uri=os.getenv('CLIENT_URI'),
+                token=os.getenv('CLIENT_TOKEN'),
+                collection_name=os.getenv("PERSONALITY_COLLECTION"),
+                dim=1536,
+                embedding_field='embeddings',
+                enable_sparse=True,
+                enable_dense=True,
+                overwrite=False,  # CHANGE IT FOR DEVELOPMENT STAGE ONLY
+                sparse_embedding_function=BGEM3SparseEmbeddingFunction(),
+                search_config={"nprobe": 20},
+                similarity_metric="IP",
+                consistency_level="Session",
+                hybrid_ranker="WeightedRanker",
+                hybrid_ranker_params={"weights": [0.65, .9]},
+            )
 
-        vector_store = MilvusVectorStore(
-            uri=os.getenv('NEW_URI'),
-            token=os.getenv('NEW_TOKEN'),
-            collection_name=os.getenv("PERSONALITY_COLLECTION"),
-            dim=1536,
-            embedding_field='embeddings',
-            enable_sparse=True,
-            enable_dense=True,
-            overwrite=False,  # CHANGE IT FOR DEVELOPMENT STAGE ONLY
-            sparse_embedding_function=BGEM3SparseEmbeddingFunction(),
-            search_config={"nprobe": 20},
-            similarity_metric="IP",
-            consistency_level="Session",
-            hybrid_ranker="WeightedRanker",
-            hybrid_ranker_params={"weights": [0.65, .9]},
-        )
+            self.vector_cache[user_id] = vector_store
+            return self.vector_cache[user_id]
+        except Exception as e:
+            return None
 
-        self.vector_cache[user_id] = vector_store
-        return self.vector_cache[user_id]
 
