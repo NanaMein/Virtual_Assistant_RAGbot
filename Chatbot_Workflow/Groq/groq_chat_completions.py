@@ -155,7 +155,7 @@ print(type(result))
 str_na = str(result)
 print(type(str_na))
 print(str_na)
-from pymilvus import MilvusClient
+from pymilvus import MilvusClient, MilvusException
 
 # client = MilvusClient(
 #     uri="https://in05-0c3198d45816662.serverless.gcp-us-west1.cloud.zilliz.com",

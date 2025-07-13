@@ -26,22 +26,22 @@ from crewai.tools import tool, BaseTool
 from crewai.project import CrewBase, task, agent, crew
 from cachetools import TTLCache, cached
 from llama_index.core.schema import MetadataMode
+from pymilvus import MilvusException
 import grpc
 import os
 import pytz
 import time
 
-
 load_dotenv()
 
+# _vector_store_cache_testing = TTLCache(maxsize=100, ttl=300)
 
 class MessageConversationVectorClass:
-
     vector_cache = TTLCache(maxsize=100, ttl=1000)
 
     def __init__(self, user_input_id: str):
         self.user_id: str = user_input_id
-
+        self._vector_store_cache_testing = None
 
 
     def activate_vector(self):
@@ -49,7 +49,7 @@ class MessageConversationVectorClass:
         attempt = 0
 
         while attempt < max_retries:
-            vector_store= self._vector_store(user_id=self.user_id)
+            vector_store = self._vector_store(user_id=self.user_id)
             if vector_store:
                 return vector_store
 
@@ -77,8 +77,49 @@ class MessageConversationVectorClass:
             print("RE INITIALIZING THE VECTOR ")
         return vector_store
 
+    def get_vector_store_by_id#(user_id: str):
+        """
+        Lazily initializes and caches the entire MilvusVectorStore instance.
+        This is the expensive operation we want to avoid repeating.
+        """
+        valid_name = user_id.strip()
+        collection_name = f"Collection_Name_{valid_name}_2025"
 
-    def _vector_store(self, user_id:str):
+        global _vector_store_cache
+        if _vector_store_cache is None:
+            print("Lazy-loading the main TTLCache for the Vector Store...")
+            # This cache will hold ONE item: the vector store instance.
+            # The TTL is a proactive "health check". After 4.5 minutes, we assume the
+            # internal connection might be stale and force a full re-initialization.
+            _vector_store_cache = TTLCache(maxsize=5, ttl=300)
+
+        try:
+            # Get the cached VectorStore instance.
+            return _vector_store_cache[user_id]
+        except KeyError:
+            # Runs if the cache is empty OR the TTL expired.
+            print("Creating new MilvusVectorStore instance (cache miss or TTL expired)...")
+            # The "create" step is now instantiating the entire class.
+            vector_store = MilvusVectorStore(
+                uri=os.getenv('CLIENT_URI'),
+                token=os.getenv('CLIENT_TOKEN'),
+                collection_name=collection_name,
+                dim=1536,
+                embedding_field='embeddings',
+                enable_sparse=True,
+                enable_dense=True,
+                overwrite=False,  # CHANGE IT FOR DEVELOPMENT STAGE ONLY
+                sparse_embedding_function=BGEM3SparseEmbeddingFunction(),
+                search_config={"nprobe": 40},
+                similarity_metric="IP",
+                consistency_level="Session",
+                hybrid_ranker="WeightedRanker",
+                hybrid_ranker_params={"weights": [0.3, 0.7]},
+            )
+
+            _vector_store_cache[user_id] = vector_store
+            return _vector_store_cache[user_id]
+    def _vector_store(self, user_id: str):
         if user_id in self.vector_cache:
             return self.vector_cache[user_id]
         collection_name = f"CLIENT_{user_id}_2025_TESTING"
@@ -105,12 +146,6 @@ class MessageConversationVectorClass:
         except Exception as e:
             return None
 
-
-
-
-
-from cachetools import TTLCache
-from pymilvus import MilvusException
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 # from llama_index.core.vector_stores import VectorStoreQuery # For typing
@@ -170,9 +205,6 @@ def query_vector_store_robustly(query_embedding, user_id: str):
     try:
         vector_store = get_vector_store_by_id(user_id)
         print("Attempting vector store query...")
-
-
-
 
         print("=> Query successful on first attempt.")
         return query_result
