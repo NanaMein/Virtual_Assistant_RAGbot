@@ -1,3 +1,6 @@
+import asyncio
+from typing import Optional
+
 from cachetools import TTLCache
 from groq.types.chat import (
     ChatCompletionSystemMessageParam,
@@ -8,25 +11,24 @@ from groq.types.chat import (
 from datetime import datetime, timezone, timedelta
 import pytz
 
-def ttl_in_hours(how_many_hour: float):
-    ttl = 3600 * how_many_hour
-    return ttl
-
 class GroqChatCache:
-
-    groq_cache = TTLCache(maxsize=100, ttl=ttl_in_hours(.5))
 
     def __init__(self, input_user_id:str):
         self.user_id:str = input_user_id
 
 
-    def _core_memory_cache(self, memory_cache_id):
+
+    def _core_memory_cache(self, memory_cache_id: str):
+
+        print(f"The current user id: {memory_cache_id}")
         try:
-            memory = self.groq_cache[memory_cache_id]
+            new_mem = chat_groq_cache[memory_cache_id]
+            print("Old Cache")
         except KeyError:
-            memory = []
-            self.groq_cache[memory_cache_id] = memory
-        return memory
+            print("New Cache")
+            chat_groq_cache[memory_cache_id] = []
+            new_mem = chat_groq_cache[memory_cache_id]
+        return new_mem
 
     def add_user_to_memory_cache(self, user_input_message: str = ""):
         if not user_input_message:
@@ -54,44 +56,6 @@ class GroqChatCache:
         assist_msg_ready = ChatCompletionAssistantMessageParam(
             content=assistant_input_message, role="assistant"
         )
-        memory.append(assist_msg_ready)
-        return True
-
-    def add_user_to_memory_with_time(self, user_input_message: str = None):
-        if user_input_message is None:
-            return False
-
-        memory = self._core_memory_cache(self.user_id)
-        ph_time = datetime.now(pytz.timezone('Asia/Manila')).strftime('%Y-%m-%d %H:%M:%S')
-
-        # msg_with_time = f"""<TimeStamp({ph_time})>
-        # [content={user_input_message}]
-        # </TimeStamp({ph_time})>"""
-        msg_with_time1 = f"""{user_input_message}[timestamp({ph_time})]"""
-
-        user_msg_ready = ChatCompletionUserMessageParam(
-            content=msg_with_time1, role="user"
-        )
-
-        memory.append(user_msg_ready)
-        return True
-
-    def add_assistant_to_memory_with_time(self, assistant_input_message: str = None):
-        if assistant_input_message is None:
-            return False
-        memory = self._core_memory_cache(self.user_id)
-
-        ph_time = datetime.now(pytz.timezone('Asia/Manila')).strftime('%Y-%m-%d %H:%M:%S')
-
-        # msg_with_time = f"""<TimeStamp({ph_time})>
-        # [content={assistant_input_message}]
-        # </TimeStamp({ph_time})>"""
-        msg_with_time1 = f"""{assistant_input_message}[timestamp({ph_time})]"""
-
-        assist_msg_ready = ChatCompletionAssistantMessageParam(
-            content=msg_with_time1, role="assistant"
-        )
-
         memory.append(assist_msg_ready)
         return True
 
@@ -132,4 +96,14 @@ class GroqChatCache:
 
 
 
+def ttl_in_hours(how_many_hour: float):
+    ttl = 3600 * how_many_hour
+    return ttl
 
+def testing_groq_cache():
+    test_groq_cache = TTLCache(maxsize=100, ttl=ttl_in_hours(.5))
+    cache_lock = asyncio.Lock()
+
+    return test_groq_cache, cache_lock
+
+chat_groq_cache, cache_lock = testing_groq_cache()
