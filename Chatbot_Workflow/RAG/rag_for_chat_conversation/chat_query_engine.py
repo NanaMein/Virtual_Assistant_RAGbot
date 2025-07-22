@@ -64,11 +64,11 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         )
         super().__init__()
 
-    @property
-    def milvus_vector_store(self):
+    # @property
+    async def milvus_vector_store(self):
         if self._vector_store is None:
-            self._vector_store = GetMilvusVectorStore(
-                input_user_id=self.state.input_user_id).milvus_vector_store()
+            _get_vector = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
+            self._vector_store = await _get_vector.milvus_vector_store()
         return self._vector_store
 
     @start()
@@ -100,7 +100,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             embed_model=self.embed_model,
             storage_context=storage_context
         )
-        return prompt, index, query_engine
+        return prompt, index
 
     @listen(initiate_logics)
     async def query_engine(self, data_from_previous):
