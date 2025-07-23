@@ -23,7 +23,8 @@ class GetMilvusVectorStore:
     """
     _vector_by_id = TTLCache(maxsize=100, ttl=300)
     _vector_by_collection = TTLCache(maxsize=100, ttl=3600)
-    _lock = asyncio.Lock()
+    _vector_lock = asyncio.Lock()
+    _client_lock = asyncio.Lock()
 
     def __init__(self, input_user_id: str):
         self.user_id: str = input_user_id
@@ -45,75 +46,91 @@ class GetMilvusVectorStore:
             self._vector = await self._getting_resource(user_id=self.user_id)
         return self._vector
 
-    async def _milvus_client(self, user_id: str):
-        if user_id in self._vector_by_collection:
-            return self._vector_by_collection[user_id]
-        async with self._lock:
-            client = MilvusClient(
-                uri=os.getenv('CLIENT_URI'),
-                token=os.getenv('CLIENT_TOKEN')
-            )
-            self._vector_by_collection[user_id] = client
-            self._vector_by_collection.expire()
-            return client
+    async def _milvus_client(self, user_id: str) -> MilvusClient:
+
+        async with self._client_lock:
+            try:
+                client = self._vector_by_collection[user_id]
+
+
+            except KeyError:
+                client = MilvusClient(
+                    uri=os.getenv('CLIENT_URI'),
+                    token=os.getenv('CLIENT_TOKEN')
+                )
+                self._vector_by_collection.pop(user_id, None)
+                self._vector_by_collection.expire()
+                self._vector_by_collection[user_id] = client
+                return client
+
+            else:
+                return client
+
 
     async def _getting_resource(self, user_id: str) -> MilvusVectorStore:
-        if user_id in self._vector_by_id:
-            return self._vector_by_id[user_id]
 
-        async with self._lock:
-            client = await self.client_for_vector()
-
-            existing_collection = client.has_collection(
-                collection_name=self.collection_name
-            )
-            vector_store = MilvusVectorStore(
-                uri=os.getenv('CLIENT_URI'),
-                token=os.getenv('CLIENT_TOKEN'),
-                collection_name=self.collection_name,
-                dim=1536,
-                embedding_field='embeddings',
-                enable_sparse=True,
-                enable_dense=True,
-                overwrite=False,  # CHANGE IT FOR DEVELOPMENT STAGE ONLY
-                sparse_embedding_function=BGEM3SparseEmbeddingFunction(),
-                search_config={"nprobe": 60},
-                similarity_metric="IP",
-                consistency_level="Session",
-                hybrid_ranker="RRFRanker",
-                hybrid_ranker_params={"k": 120},
-            )
-            if not existing_collection:
-                client.alter_collection_properties(
-                    collection_name=self.collection_name,
-                    properties={"collection.ttl.seconds": ttl_conversion_to_day(15)}
+        async with self._vector_lock:
+            try:
+                vector_store = self._vector_by_id[user_id]
+            except KeyError:
+                client = await self.client_for_vector()
+                existing_collection = client.has_collection(
+                    collection_name=self.collection_name
                 )
 
+                vector_store = MilvusVectorStore(
+                    uri=os.getenv('CLIENT_URI'),
+                    token=os.getenv('CLIENT_TOKEN'),
+                    collection_name=self.collection_name,
+                    dim=1536,
+                    embedding_field='embeddings',
+                    enable_sparse=True,
+                    enable_dense=True,
+                    overwrite=False,  # CHANGE IT FOR DEVELOPMENT STAGE ONLY
+                    sparse_embedding_function=BGEM3SparseEmbeddingFunction(),
+                    search_config={"nprobe": 60},
+                    similarity_metric="IP",
+                    consistency_level="Session",
+                    hybrid_ranker="RRFRanker",
+                    hybrid_ranker_params={"k": 120},
+                    use_async=True,
+                )
 
-            self._vector_by_id[user_id] = vector_store
-            self._vector_by_id.expire()
-            return self._vector_by_id[user_id]
+                if not existing_collection:
+                    client.alter_collection_properties(
+                        collection_name=self.collection_name,
+                        properties={"collection.ttl.seconds": ttl_conversion_to_day(15)}
+                    )
 
-    async def milvus_vector_store(self):
+                self._vector_by_id.expire()
+
+                self._vector_by_id[user_id] = vector_store
+                return vector_store
+            else:
+                return vector_store
+
+
+    async def milvus_vector_store(self) -> Optional[MilvusVectorStore]:
         try:
             vector_store = await self.vector_store()
-        except (MilvusException, KeyError) as me:
-            print(f"MilvusException, KeyError: {me}")
-            self._vector = None
-            self._client = None
-            vector_store = await self.vector_store()
-        except (AioRpcError, ImportError, grpc.RpcError, UnboundLocalError) as aie:
-            print(f"AioRpcError, ImportError, RpcError, UnboundLocalError: {aie}")
-            self._vector = None
-            self._client = None
-            vector_store = await self.vector_store()
-        except Exception as e:
-            print(f"Unexpected Error: {e}")
-            self._vector = None
-            self._client = None
-            return None
 
-        return vector_store
+        except (AioRpcError, UnboundLocalError, MilvusException) as aie:
+            print(f"AioRpcError, UnboundLocalError: {aie}")
+            async with self._vector_lock:
+                self._vector_by_id.pop(self.user_id, None)
+                self._vector_by_id.expire()
+            async with self._client_lock:
+                self._vector_by_collection.pop(self.user_id, None)
+                self._vector_by_collection.expire()
+            try:
+                return await self.vector_store()
+            except Exception:
+                return None
+        else:
+            return vector_store
+
+
+
 
 def ttl_conversion_to_day(number_of_days: float):
     total = 86400 * number_of_days
