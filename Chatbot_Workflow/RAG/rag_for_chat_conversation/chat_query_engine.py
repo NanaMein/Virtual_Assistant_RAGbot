@@ -35,7 +35,7 @@ from grpc.aio import AioRpcError
 from grpc import RpcError
 
 
-from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore
+from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore, ZillizCloudConnectionError
 load_dotenv()
 
 
@@ -123,6 +123,16 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         )
         self.state.holding_index = index
         return prompt, index
+
+    @router(starting_with_prompt)
+    async def error_handling(self):
+        try:
+            embed_model, _ = await self.llm_and_embed_resources()
+            vector_store = await self.milvus_vector_store()
+            return "success"
+
+        except ZillizCloudConnectionError:
+            return "failed"
 
     @listen(initiate_logics)
     async def query_engine(self, data_from_previous):

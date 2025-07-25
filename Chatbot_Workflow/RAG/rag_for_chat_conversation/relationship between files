@@ -1,0 +1,13 @@
+chat_memory_vector = (Vector)
+chat_embed_to_vector = (Embed)
+chat_query_engine = (Query)
+
+
+(Vector) is where the vector store is located, it has error handling and raising error on its own
+
+(Vector) is lower abstract of (Query) and (Embed)
+
+(Embed) is where you put text or conversation of user and assistant to vector. it uses (Vector) to store
+text to vector itself
+
+(Query) is where you retrieve data from (Vector)
