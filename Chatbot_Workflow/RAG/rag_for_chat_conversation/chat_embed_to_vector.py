@@ -9,7 +9,12 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
 from llama_index.vector_stores.milvus import MilvusVectorStore
 from llama_index.vector_stores.milvus.utils import BGEM3SparseEmbeddingFunction
-from llama_index.core import VectorStoreIndex, Document, StorageContext, SimpleDirectoryReader
+from llama_index.core import (
+    VectorStoreIndex,
+    Document,
+    StorageContext,
+    SimpleDirectoryReader
+)
 from llama_index.core.text_splitter import SentenceSplitter
 from llama_index.core.tools import QueryEngineTool, FunctionTool
 from llama_index.core.agent.workflow import FunctionAgent, ReActAgent, AgentWorkflow
@@ -35,94 +40,93 @@ import time
 from grpc.aio import AioRpcError
 from grpc import RpcError
 from llama_index.core.node_parser import TokenTextSplitter
-from llama_index.core.extractors import TitleExtractor, QuestionsAnsweredExtractor, SummaryExtractor, DocumentContextExtractor
+from llama_index.core.extractors import (
+    TitleExtractor,
+    QuestionsAnsweredExtractor,
+    SummaryExtractor,
+    DocumentContextExtractor
+)
 from llama_index.core.ingestion import IngestionPipeline
+from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
+    GetMilvusVectorStore,
+    ZillizCloudConnectionError
+)
 
 
-
-from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore
 load_dotenv()
 
 
+
+class PipelineException(Exception):
+    """Failure in processing the documents to saving in vector"""
+    pass
+
+class DocumentIngestionError(PipelineException):
+    """Error in document processing"""
+    pass
+
+class InitializedResourcesError(PipelineException):
+    """Error occurring in the embed or llm"""
+    pass
 
 
 class ChatConversationVectorCache:
 
     _cache = TTLCache(maxsize=100, ttl=3600)
-    _lock = asyncio.Lock()
+
 
     def __init__(self, user_id: str):
         self.user_id:str = user_id
-        self._vector_store: Optional[MilvusVectorStore] = None
+        # self._vector_store: Optional[MilvusVectorStore] = None
+        self._get = GetMilvusVectorStore(input_user_id=self.user_id)
+        self._lock: Optional[asyncio.Lock] = None
+
+    async def lock(self):
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def _internal_cache(self) -> Tuple[CohereEmbedding, LlamaGroq]:
 
         async with self._lock:
             try:
                 embed_model, llm = self._cache[self.user_id]
+                return embed_model, llm
+
             except KeyError:
-                llm = LlamaGroq(
-                    model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    api_key=os.getenv("CLIENT_GROQ_API_1"),
-                    temperature=0.25
-                )
-                embed_model = CohereEmbedding(
-                    model_name="embed-v4.0",
-                    api_key=os.getenv('CLIENT_COHERE_API_KEY'),
-                    input_type="search_document"
-                )
-                self._cache.pop(self.user_id, None)
-                self._cache.expire()
-                self._cache[self.user_id] = embed_model, llm
-                return embed_model, llm
-            else:
-                return embed_model, llm
+                pass
 
-    async def embed_model_and_llm(self):
-        return await self._internal_cache()
-
-    async def vector_store(self):
-        if self._vector_store is None:
-            get_vector = GetMilvusVectorStore(input_user_id=self.user_id)
-            self._vector_store = await get_vector.milvus_vector_store()
-        return self._vector_store
-
-
-    async def add_conversation_turn_to_vector(
-            self, input_user_message: str,
-            input_assistant_message: str
-    ) -> bool:
-
-
-
-        vector_store = await self.vector_store()
-        embed_model, llm = await self.embed_model_and_llm()
-
-        user = f"(role=user content=[{input_user_message}] "
-        assistant = f" role=assistant content=[{input_assistant_message}])"
-
-        date_now, time_now = self.utc_to_ph()
-
-        document_input = user + assistant
-        _docs = [Document(
-            text=document_input,
-                 metadata={
-                     "Date":date_now,
-                     "Time":time_now
-                 }
+            llm = LlamaGroq(
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                api_key=os.getenv("CLIENT_GROQ_API_1"),
+                temperature=0.25
             )
-        ]
+            embed_model = CohereEmbedding(
+                model_name="embed-v4.0",
+                api_key=os.getenv('CLIENT_COHERE_API_KEY'),
+                input_type="search_document"
+            )
+            self._cache.pop(self.user_id, None)
+            self._cache.expire()
+            self._cache[self.user_id] = embed_model, llm
+            return embed_model, llm
 
-        parser = SentenceSplitter(chunk_size=350, chunk_overlap=60)
-        _nodes = await parser.aget_nodes_from_documents(_docs)
-        index = VectorStoreIndex.from_vector_store(
-            vector_store=vector_store,
-            embed_model=embed_model,
-            use_async=True
-        )
-        await index.ainsert_nodes(nodes=_nodes)
+    async def resources(self)->Optional[Tuple[VectorStoreIndex, CohereEmbedding, LlamaGroq]]:
+        """
+        returns:
+            Vector store, Embed Model, and LLM
+        """
+        try:
+            vector = await self._get.milvus_vector_store()
+        except ZillizCloudConnectionError:
+            raise ZillizCloudConnectionError("Error in vector ")
 
-        return True
+        try:
+            embed, llm = await self._internal_cache()
+        except InitializedResourcesError:
+            raise InitializedResourcesError("Error in api ")
+
+        return vector, embed, llm
 
     @staticmethod
     def utc_to_ph():
@@ -136,50 +140,52 @@ class ChatConversationVectorCache:
 
         return date_now, time_now
 
-    async def _hard_reset(self):
-        async with self._lock:
-            self._cache.pop(self.user_id, None)
-            self._vector_store = None
-            self._cache.expire()
 
     async def add_conversation_with_extractor(
         self, input_user_message: str,
         input_assistant_message: str
     ) -> bool:
-        try:
-            vector_store = await self.vector_store()
-            embed_model, llm = await self.embed_model_and_llm()
+        lock = await self.lock()
+        async with lock:
+            try:
+                vector_store, embed_model, llm = await self.resources()
+            except ZillizCloudConnectionError:
+                raise ZillizCloudConnectionError("Error please try again later: ")
+            except InitializedResourcesError:
+                raise InitializedResourcesError("Error please try again later: ")
 
-            user = f"(role=user content=[{input_user_message}] "
-            assistant = f" role=assistant content=[{input_assistant_message}])"
+            try:
+                user = f"<conversation_turn>role=user content={input_user_message} "
+                assistant = f" role=assistant content={input_assistant_message}</conversation_turn>"
 
-            date_now, time_now = self.utc_to_ph()
+                date_now, time_now = self.utc_to_ph()
 
-            document_input = user + assistant
-            _docs = [Document(
-                text=document_input,
-                    metadata={
-                        "Date": date_now,
-                        "Time": time_now
-                    }
+                document_input = user + assistant
+                _docs = [Document(
+                    text=document_input,
+                        metadata={
+                            "Date": date_now,
+                            "Time": time_now
+                        }
+                    )
+                ]
+                extractors = [
+                    TitleExtractor(nodes=3, llm=llm),
+                    QuestionsAnsweredExtractor(questions=2, llm=llm),
+                    SummaryExtractor(summaries=["prev", "self", "next"], llm=llm),
+                ]
+
+                text_splitter = TokenTextSplitter(chunk_size=350, chunk_overlap=60)
+                pipeline = IngestionPipeline(transformations=[text_splitter] + extractors)
+                _nodes = pipeline.run(documents=_docs)
+                index = VectorStoreIndex.from_vector_store(
+                    vector_store=vector_store,
+                    embed_model=embed_model,
+                    use_async=True
                 )
-            ]
-            extractors = [
-                TitleExtractor(nodes=3, llm=llm),
-                QuestionsAnsweredExtractor(questions=2, llm=llm),
-                SummaryExtractor(summaries=["prev", "self", "next"], llm=llm),
-            ]
-            # parser = SentenceSplitter(chunk_size=350, chunk_overlap=60)
-            text_splitter = TokenTextSplitter(chunk_size=350, chunk_overlap=60)
-            pipeline = IngestionPipeline(transformations=[text_splitter] + extractors)
-            _nodes = pipeline.run(documents=_docs)
-            index = VectorStoreIndex.from_vector_store(
-                vector_store=vector_store,
-                embed_model=embed_model,
-                use_async=True
-            )
-            await index.ainsert_nodes(nodes=_nodes)
+                await index.ainsert_nodes(nodes=_nodes)
+                return True
 
-            # return True
-        except Exception as e:
-            raise MilvusException(message="Fucking error") from e
+
+            except Exception as e:
+                raise DocumentIngestionError("Error is hard to identify, please try again later") from e

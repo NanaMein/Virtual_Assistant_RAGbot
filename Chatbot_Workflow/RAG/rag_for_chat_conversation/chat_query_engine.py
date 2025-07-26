@@ -45,7 +45,7 @@ class FlowState(BaseModel):
     input_user_id: str = ""
     input_user_message: str = ""
     user_message_v1: str = ""
-    holding_index: Optional[VectorStoreIndex] = PrivateAttr(default=None)
+    index: Optional[VectorStoreIndex] = PrivateAttr(default=None)
 
 
 class ChatHistoryQueryEngine(Flow[FlowState]):
