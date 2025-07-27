@@ -12,10 +12,16 @@ from grpc.aio import AioRpcError
 
 load_dotenv()
 
-class ZillizCloudConnectionError(Exception):
-    """Unexpected error occurred in the with either the client connection or the zilliz cloud connection"""
+
+class ZillizCloudError(Exception):
+    """Main errors for all related to zilliz cloud"""
     pass
 
+class ZillizCommonError(ZillizCloudError):
+    pass
+
+class ZillizUnexpectedError(ZillizCloudError):
+    pass
 
 class GetMilvusVectorStore:
     """
@@ -30,24 +36,25 @@ class GetMilvusVectorStore:
 
     def __init__(self, input_user_id: str):
         self.user_id: str = input_user_id
+        self.collection_name: str = f"Collection_Name_{self.user_id.strip()}_2025"
         self._vector_init: Optional[MilvusVectorStore] = None
         self._client_init: Optional[MilvusClient] = None
-        self.collection_name: str = f"Collection_Name_{self.user_id.strip()}_2025"
         self._vector_lock = asyncio.Lock()
         self._client_lock = asyncio.Lock()
 
     async def _client(self) -> MilvusClient:
         if self._client_init is None:
-            self._client_init = await self._milvus_client(user_id=self.user_id)
+            self._client_init = await self._get_connection_to_client_server(user_id=self.user_id)
         return self._client_init
 
     async def _vector(self) -> MilvusVectorStore:
         if self._vector_init is None:
-            self._vector_init = await self._getting_resource(user_id=self.user_id)
+            self._vector_init = await self._get_connection_to_milvus_vector_store(user_id=self.user_id)
         return self._vector_init
 
-    async def _milvus_client(self, user_id: str) -> MilvusClient:
-
+    async def _get_connection_to_client_server(self, user_id: str) -> MilvusClient:
+        """simple low level connection to zilliz client server.
+        Only used if collection name exist and alter properties"""
         async with self._client_lock:
             try:
                 client = self._client_cache[user_id]
@@ -61,18 +68,15 @@ class GetMilvusVectorStore:
                 token=os.getenv('CLIENT_TOKEN')
             )
             self._client_cache.pop(user_id, None)
-            self._client_cache.expire()
             self._client_cache[user_id] = client
             return client
 
-
-    async def _getting_resource(self, user_id: str) -> MilvusVectorStore:
-
+    async def _get_connection_to_milvus_vector_store(self, user_id: str) -> MilvusVectorStore:
+        """Getting vector store from """
         async with self._vector_lock:
             try:
                 vector_store = self._vector_cache[user_id]
                 return vector_store
-
             except KeyError:
                 pass
 
@@ -104,32 +108,12 @@ class GetMilvusVectorStore:
                     collection_name=self.collection_name,
                     properties={"collection.ttl.seconds": ttl_conversion_to_day(15)}
                 )
-
-            self._vector_cache.expire()
-
             self._vector_cache[user_id] = vector_store
             return vector_store
 
-    async def milvus_vector_store(self) -> Optional[MilvusVectorStore]:
-        for attempt in range(2):
-            try:
-                return await self._vector()
-
-            except (AioRpcError, UnboundLocalError, ImportError, MilvusException):
-                async with self._client_lock:
-                    self._client_cache.pop(self.user_id, None)
-                    self._client_cache.expire()
-                    if attempt == 1:
-                        self._client_init = None
-                async with self._vector_lock:
-                    self._vector_cache.pop(self.user_id, None)
-                    self._vector_cache.expire()
-                    if attempt == 1:
-                        self._vector_init = None
-
-        raise ZillizCloudConnectionError("Unexpected Error occurred, please try again later")
-
     async def _refresh_and_get_vector(self):
+        """Will check connection if working, then reconnect all api to milvus
+        and return vector"""
         async with self._client_lock:
             try:
                 await self._client()
@@ -143,21 +127,24 @@ class GetMilvusVectorStore:
             except (AioRpcError, MilvusException):
                 self._vector_cache.pop(self.user_id, None)
                 self._vector_cache.expire()
-
-        return await self._vector()
-
-    async def zilliz_vector_cloud(self):
+        #Reconnection and trying the refreshed vector or normally pass the async lock
+        #with reconnection to cache
         try:
-            vector = await self._refresh_and_get_vector()
-            return vector
-        except (AioRpcError, MilvusException) as e:
-            raise ZillizCloudConnectionError("Error happened, please try again later") from e
+            return await self._vector()
+
+        except (AioRpcError, MilvusException, UnboundLocalError, ImportError):
+            raise
+
+    async def zilliz_vector_cloud(self) -> MilvusVectorStore:
+        """Uses refresh and reconnect if an error occurred in vector function.
+        Then raise error if an unexpected error occur"""
+        try:
+            refreshed_vector = await self._refresh_and_get_vector()
+            return refreshed_vector
+        except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as e:
+            raise ZillizCommonError("Common Error happened, please try again later, : ") from e
         except Exception as e:
-            raise ZillizCloudConnectionError("Unexpected Error, Recommended to stop and try again after few mins") from e
-
-
-
-
+            raise ZillizUnexpectedError("Unexpected Error happened, wait for few minutes and try again later") from e
 
 
 def ttl_conversion_to_day(number_of_days: float):
@@ -166,3 +153,19 @@ def ttl_conversion_to_day(number_of_days: float):
 
 
 
+# async def milvus_vector_store(self) -> Optional[MilvusVectorStore]:
+#     for attempt in range(2):
+#         try:
+#             return await self._vector()
+#
+#         except (AioRpcError, UnboundLocalError, ImportError, MilvusException):
+#             async with self._client_lock:
+#                 self._client_cache.pop(self.user_id, None)
+#                 self._client_cache.expire()
+#                 self._client_init = None
+#             async with self._vector_lock:
+#                 self._vector_cache.pop(self.user_id, None)
+#                 self._vector_cache.expire()
+#                 self._vector_init = None
+#
+#     raise ZillizCloudConnectionError("Unexpected Error occurred, please try again later")

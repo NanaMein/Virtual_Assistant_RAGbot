@@ -49,7 +49,8 @@ from llama_index.core.extractors import (
 from llama_index.core.ingestion import IngestionPipeline
 from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
     GetMilvusVectorStore,
-    ZillizCloudConnectionError
+    ZillizCommonError,
+    ZillizUnexpectedError
 )
 
 
@@ -57,15 +58,15 @@ load_dotenv()
 
 
 
-class PipelineException(Exception):
+class IngestionPipelineError(Exception):
     """Failure in processing the documents to saving in vector"""
     pass
 
-class DocumentIngestionError(PipelineException):
+class DocumentTransformingError(IngestionPipelineError):
     """Error in document processing"""
     pass
 
-class InitializedResourcesError(PipelineException):
+class InitializedResourcesError(IngestionPipelineError):
     """Error occurring in the embed or llm"""
     pass
 
@@ -74,17 +75,10 @@ class ChatConversationVectorCache:
 
     _cache = TTLCache(maxsize=100, ttl=3600)
 
-
     def __init__(self, user_id: str):
         self.user_id:str = user_id
-        # self._vector_store: Optional[MilvusVectorStore] = None
         self._get = GetMilvusVectorStore(input_user_id=self.user_id)
-        self._lock: Optional[asyncio.Lock] = None
-
-    async def lock(self):
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+        self._lock = asyncio.Lock()
 
     async def _internal_cache(self) -> Tuple[CohereEmbedding, LlamaGroq]:
 
@@ -111,20 +105,19 @@ class ChatConversationVectorCache:
             self._cache[self.user_id] = embed_model, llm
             return embed_model, llm
 
-    async def resources(self)->Optional[Tuple[VectorStoreIndex, CohereEmbedding, LlamaGroq]]:
+    async def resources(self) -> Tuple[VectorStoreIndex, CohereEmbedding, LlamaGroq]:
         """
         returns:
             Vector store, Embed Model, and LLM
         """
         try:
-            vector = await self._get.milvus_vector_store()
-        except ZillizCloudConnectionError:
-            raise ZillizCloudConnectionError("Error in vector ")
+            vector = await self._get.zilliz_vector_cloud()
+        except ZillizCommonError:
+            raise
+        except ZillizUnexpectedError:
+            raise
 
-        try:
-            embed, llm = await self._internal_cache()
-        except InitializedResourcesError:
-            raise InitializedResourcesError("Error in api ")
+        embed, llm = await self._internal_cache()
 
         return vector, embed, llm
 
@@ -145,14 +138,17 @@ class ChatConversationVectorCache:
         self, input_user_message: str,
         input_assistant_message: str
     ) -> bool:
-        lock = await self.lock()
-        async with lock:
+
+        async with self._lock:
+
             try:
                 vector_store, embed_model, llm = await self.resources()
-            except ZillizCloudConnectionError:
-                raise ZillizCloudConnectionError("Error please try again later: ")
-            except InitializedResourcesError:
-                raise InitializedResourcesError("Error please try again later: ")
+            except ZillizCommonError as ce:
+                raise InitializedResourcesError("Error in database, can be used later") from ce
+            except ZillizUnexpectedError as ue:
+                raise InitializedResourcesError("Unexpected Error, Vector calls might be critical") from ue
+            except Exception as ex:
+                raise InitializedResourcesError("Unexpected Error, API Calls or Program might be critical") from ex
 
             try:
                 user = f"<conversation_turn>role=user content={input_user_message} "
@@ -188,4 +184,4 @@ class ChatConversationVectorCache:
 
 
             except Exception as e:
-                raise DocumentIngestionError("Error is hard to identify, please try again later") from e
+                raise DocumentTransformingError("Error is hard to identify, please try again later") from e

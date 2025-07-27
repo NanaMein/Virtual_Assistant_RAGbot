@@ -35,11 +35,17 @@ from grpc.aio import AioRpcError
 from grpc import RpcError
 
 
-from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore, ZillizCloudConnectionError
+from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore,
 load_dotenv()
 
 
+class QueryEngineException(Exception):
+    """Error happens in Query engine"""
+    pass
 
+class ResourcesInitializedError(QueryEngineException):
+    """Failed to initialization of the error or api calls"""
+    pass
 
 class FlowState(BaseModel):
     input_user_id: str = ""
@@ -49,21 +55,22 @@ class FlowState(BaseModel):
 
 
 class ChatHistoryQueryEngine(Flow[FlowState]):
-    _lock = asyncio.Lock()
+
     _caching_resources = TTLCache(maxsize=100, ttl=3600)
 
     def __init__(self):
         self._vector_store: Optional[MilvusVectorStore] = None
+        self._lock = asyncio.Lock()
 
         super().__init__()
 
-    async def milvus_vector_store(self):
+    async def _milvus_vector_store(self):
         if self._vector_store is None:
             _get_vector = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
             self._vector_store = await _get_vector.milvus_vector_store()
         return self._vector_store
 
-    async def llm_and_embed_resources(self) -> Optional[Tuple[CohereEmbedding, Llama_Groq]] | None:
+    async def _llm_and_embed_resources(self) -> Optional[Tuple[CohereEmbedding, Llama_Groq]] | None:
         async with self._lock:
             user_id = self.state.input_user_id
             try:
@@ -84,14 +91,16 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                 self._caching_resources.pop(user_id, None)
                 self._caching_resources.expire()
                 self._caching_resources[user_id] = (embed_model, llm_for_rag)
-                # return embed_model, llm_for_rag
-                try:
-                    embed_model_v1, llm_for_rag_v1 = self._caching_resources[user_id]
-                    return embed_model_v1, llm_for_rag_v1
-                except Exception:
-                    return None, None
+                return embed_model, llm_for_rag
+                # try:
+                #     embed_model_v1, llm_for_rag_v1 = self._caching_resources[user_id]
+                #     return embed_model_v1, llm_for_rag_v1
+                # except Exception:
+                #     return None, None
 
-
+    async def get_resources(self):
+        _get_vector = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
+        vector_store = await _get_vector.zilliz_vector_cloud()
 
     @start()
     def starting_with_prompt(self):
