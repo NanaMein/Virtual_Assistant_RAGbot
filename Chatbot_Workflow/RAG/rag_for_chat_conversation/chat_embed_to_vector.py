@@ -48,27 +48,25 @@ from llama_index.core.extractors import (
 )
 from llama_index.core.ingestion import IngestionPipeline
 from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
-    GetMilvusVectorStore,
-    ZillizCommonError,
-    ZillizUnexpectedError
+    GetMilvusVectorStore
 )
 
 
 load_dotenv()
 
 
-
-class IngestionPipelineError(Exception):
-    """Failure in processing the documents to saving in vector"""
-    pass
-
-class DocumentTransformingError(IngestionPipelineError):
-    """Error in document processing"""
-    pass
-
-class InitializedResourcesError(IngestionPipelineError):
-    """Error occurring in the embed or llm"""
-    pass
+#
+# class IngestionPipelineError(Exception):
+#     """Failure in processing the documents to saving in vector"""
+#     pass
+#
+# class DocumentTransformingError(IngestionPipelineError):
+#     """Error in document processing"""
+#     pass
+#
+# class InitializedResourcesError(IngestionPipelineError):
+#     """Error occurring in the embed or llm"""
+#     pass
 
 
 class ChatConversationVectorCache:
@@ -80,15 +78,14 @@ class ChatConversationVectorCache:
         self._get = GetMilvusVectorStore(input_user_id=self.user_id)
         self._lock = asyncio.Lock()
 
-    async def _internal_cache(self) -> Tuple[CohereEmbedding, LlamaGroq]:
+    async def _internal_cache(self) -> Optional[Tuple[CohereEmbedding, LlamaGroq]]:
 
         async with self._lock:
-            try:
-                embed_model, llm = self._cache[self.user_id]
-                return embed_model, llm
+            inside_cache = self._cache.get(self.user_id)
 
-            except KeyError:
-                pass
+            if isinstance(inside_cache, tuple) and len(inside_cache)==2:
+                embed_model, llm = inside_cache
+                return embed_model, llm
 
             llm = LlamaGroq(
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
@@ -105,21 +102,34 @@ class ChatConversationVectorCache:
             self._cache[self.user_id] = embed_model, llm
             return embed_model, llm
 
-    async def resources(self) -> Tuple[VectorStoreIndex, CohereEmbedding, LlamaGroq]:
+
+    async def _validating_resources(self) -> bool:
+        vector_store = await self._get.zilliz_vector_cloud()
+        if not vector_store:
+            print("Vector error")
+            return False
+
+        else:
+            try:
+                await self._internal_cache()
+                return True
+            except Exception as e:
+                print(f"Internal Cache Error: {e}")
+                return False
+
+    async def resources(self) -> Tuple[MilvusVectorStore, CohereEmbedding, LlamaGroq, bool]:
         """
         returns:
             Vector store, Embed Model, and LLM
         """
-        try:
-            vector = await self._get.zilliz_vector_cloud()
-        except ZillizCommonError:
-            raise
-        except ZillizUnexpectedError:
-            raise
-
+        vector = await self._get.zilliz_vector_cloud()
         embed, llm = await self._internal_cache()
+        validation = await self._validating_resources()
 
-        return vector, embed, llm
+        return vector, embed, llm, validation
+
+
+
 
     @staticmethod
     def utc_to_ph():
@@ -141,14 +151,9 @@ class ChatConversationVectorCache:
 
         async with self._lock:
 
-            try:
-                vector_store, embed_model, llm = await self.resources()
-            except ZillizCommonError as ce:
-                raise InitializedResourcesError("Error in database, can be used later") from ce
-            except ZillizUnexpectedError as ue:
-                raise InitializedResourcesError("Unexpected Error, Vector calls might be critical") from ue
-            except Exception as ex:
-                raise InitializedResourcesError("Unexpected Error, API Calls or Program might be critical") from ex
+            vector_store, embed_model, llm, validation = await self.resources()
+            if not validation:
+                return False
 
             try:
                 user = f"<conversation_turn>role=user content={input_user_message} "
@@ -182,6 +187,5 @@ class ChatConversationVectorCache:
                 await index.ainsert_nodes(nodes=_nodes)
                 return True
 
-
             except Exception as e:
-                raise DocumentTransformingError("Error is hard to identify, please try again later") from e
+                return False

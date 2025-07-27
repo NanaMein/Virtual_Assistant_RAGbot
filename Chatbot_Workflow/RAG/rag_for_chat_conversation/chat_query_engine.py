@@ -35,7 +35,7 @@ from grpc.aio import AioRpcError
 from grpc import RpcError
 
 
-from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore,
+from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore
 load_dotenv()
 
 
@@ -60,47 +60,84 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
 
     def __init__(self):
         self._vector_store: Optional[MilvusVectorStore] = None
+        self._vector_resources: Optional[GetMilvusVectorStore] = None
         self._lock = asyncio.Lock()
 
         super().__init__()
 
-    async def _milvus_vector_store(self):
-        if self._vector_store is None:
-            _get_vector = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
-            self._vector_store = await _get_vector.milvus_vector_store()
-        return self._vector_store
+    @property
+    def vector_resource_is(self) -> GetMilvusVectorStore:
+        if self._vector_resources is None:
+            self._vector_resources = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
+        return self._vector_resources
 
-    async def _llm_and_embed_resources(self) -> Optional[Tuple[CohereEmbedding, Llama_Groq]] | None:
+    async def _llm_and_embed_resources(self) -> Tuple[CohereEmbedding, Llama_Groq]:
         async with self._lock:
             user_id = self.state.input_user_id
+            validate = self._caching_resources.get(user_id)
+
+            if isinstance(validate, tuple) and len(validate) == 2:
+                embed_model, llm_for_rag = validate
+                return embed_model, llm_for_rag
+
+            embed_model = CohereEmbedding(
+                input_type="search_query",
+                model_name="embed-v4.0",
+                api_key=os.getenv("CLIENT_COHERE_API_KEY")
+            )
+            llm_for_rag = Llama_Groq(
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                api_key=os.getenv("CLIENT_GROQ_API_1"),
+                temperature=0.3
+            )
+            self._caching_resources.pop(user_id, None)
+            self._caching_resources.expire()
+            self._caching_resources[user_id] = (embed_model, llm_for_rag)
+            return embed_model, llm_for_rag
+
+    async def _validate_resources(self) -> bool:
+        vector = await self.vector_resource_is.zilliz_vector_cloud()
+        if not vector:
+            return False
+
+        else:
             try:
-                embed_model, llm_for_rag = self._caching_resources[user_id]
-                return embed_model, llm_for_rag
+                embed_model, llm_for_rag = await self._llm_and_embed_resources()
+                return True
+            except Exception as e:
+                return False
 
-            except KeyError:
-                embed_model = CohereEmbedding(
-                    input_type="search_query",
-                    model_name="embed-v4.0",
-                    api_key=os.getenv("CLIENT_COHERE_API_KEY")
-                )
-                llm_for_rag = Llama_Groq(
-                    model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    api_key=os.getenv("CLIENT_GROQ_API_1"),
-                    temperature=0.3
-                )
-                self._caching_resources.pop(user_id, None)
-                self._caching_resources.expire()
-                self._caching_resources[user_id] = (embed_model, llm_for_rag)
-                return embed_model, llm_for_rag
-                # try:
-                #     embed_model_v1, llm_for_rag_v1 = self._caching_resources[user_id]
-                #     return embed_model_v1, llm_for_rag_v1
-                # except Exception:
-                #     return None, None
+    async def init_query_engine_resources(self)-> Optional[Tuple[MilvusVectorStore, CohereEmbedding, Llama_Groq]]:
+        vector_store = await self.vector_resource_is.zilliz_vector_cloud()
 
-    async def get_resources(self):
-        _get_vector = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
-        vector_store = await _get_vector.zilliz_vector_cloud()
+        embed_model, llm_for_rag = await self._llm_and_embed_resources()
+        validation = await self._validate_resources()
+        if validation:
+            return vector_store, embed_model, llm_for_rag
+        else:
+            return None, None, None
+
+    async def query_engine_core(self, input_message: str) -> Optional[str]:
+        async with self._lock:
+            validate=self._validate_resources()
+            vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
+            if validate:
+                try:
+                    index = VectorStoreIndex.from_vector_store(
+                        vector_store=vector_store,embed_model=embed_model,use_async=True
+                    )
+                    query_engine = index.as_query_engine(
+                        llm=llm_for_rag,
+                        vector_store_query_mode="hybrid",
+                        similarity_top_k=7,
+                        use_async=True,
+                    )
+                    retrieved_query = await query_engine.aquery(input_message)
+                    return retrieved_query.response
+                except Exception as e:
+                    return None
+            else:
+                return None
 
     @start()
     def starting_with_prompt(self):
@@ -122,13 +159,12 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
     @listen(starting_with_prompt)
     async def initiate_logics(self, data_from_previous):
         prompt = data_from_previous
-
-        embed_model, _ = await self.llm_and_embed_resources()
-        vector_store = await self.milvus_vector_store()
+        vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
 
         index = VectorStoreIndex.from_vector_store(
             vector_store=vector_store,
             embed_model=embed_model,
+            use_async=True
         )
         self.state.holding_index = index
         return prompt, index

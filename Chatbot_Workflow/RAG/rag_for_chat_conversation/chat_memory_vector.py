@@ -1,5 +1,5 @@
 import asyncio
-from typing import Deque, Type, Optional, Tuple
+from typing import Deque, Type, Optional, Tuple, Union
 from llama_index.vector_stores.milvus import MilvusVectorStore
 from llama_index.vector_stores.milvus.utils import BGEM3SparseEmbeddingFunction
 from dotenv import load_dotenv
@@ -13,15 +13,15 @@ from grpc.aio import AioRpcError
 load_dotenv()
 
 
-class ZillizCloudError(Exception):
-    """Main errors for all related to zilliz cloud"""
-    pass
-
-class ZillizCommonError(ZillizCloudError):
-    pass
-
-class ZillizUnexpectedError(ZillizCloudError):
-    pass
+# class ZillizCloudError(Exception):
+#     """Main errors for all related to zilliz cloud"""
+#     pass
+#
+# class ZillizCommonError(ZillizCloudError):
+#     pass
+#
+# class ZillizUnexpectedError(ZillizCloudError):
+#     pass
 
 class GetMilvusVectorStore:
     """
@@ -56,29 +56,27 @@ class GetMilvusVectorStore:
         """simple low level connection to zilliz client server.
         Only used if collection name exist and alter properties"""
         async with self._client_lock:
-            try:
-                client = self._client_cache[user_id]
-                return client
 
-            except KeyError:
-                pass
+            client_in_cache = self._client_cache.get(user_id)
+
+            if client_in_cache:
+                return client_in_cache
 
             client = MilvusClient(
                 uri=os.getenv('CLIENT_URI'),
                 token=os.getenv('CLIENT_TOKEN')
             )
-            self._client_cache.pop(user_id, None)
             self._client_cache[user_id] = client
             return client
 
     async def _get_connection_to_milvus_vector_store(self, user_id: str) -> MilvusVectorStore:
         """Getting vector store from """
         async with self._vector_lock:
-            try:
-                vector_store = self._vector_cache[user_id]
-                return vector_store
-            except KeyError:
-                pass
+
+            vector_store_in_cache = self._vector_cache.get(user_id)
+
+            if vector_store_in_cache:
+                return vector_store_in_cache
 
             client = await self._client()
             existing_collection = client.has_collection(
@@ -127,30 +125,29 @@ class GetMilvusVectorStore:
             except (AioRpcError, MilvusException):
                 self._vector_cache.pop(self.user_id, None)
                 self._vector_cache.expire()
-        #Reconnection and trying the refreshed vector or normally pass the async lock
-        #with reconnection to cache
-        try:
-            return await self._vector()
 
-        except (AioRpcError, MilvusException, UnboundLocalError, ImportError):
-            raise
+        return await self._vector()
 
-    async def zilliz_vector_cloud(self) -> MilvusVectorStore:
+
+    async def zilliz_vector_cloud(self) -> Optional[MilvusVectorStore]:
         """Uses refresh and reconnect if an error occurred in vector function.
         Then raise error if an unexpected error occur"""
         try:
             refreshed_vector = await self._refresh_and_get_vector()
             return refreshed_vector
-        except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as e:
-            raise ZillizCommonError("Common Error happened, please try again later, : ") from e
-        except Exception as e:
-            raise ZillizUnexpectedError("Unexpected Error happened, wait for few minutes and try again later") from e
+
+        except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as ce:
+            print(f"Catching common error in vector: {ce}")
+            return None
+        except Exception as ex:
+            print(f"Catching unexpected error in vector: {ex}\n"
+                  f"Error type: {type(ex)}")
+            return None
 
 
 def ttl_conversion_to_day(number_of_days: float):
     total = 86400 * number_of_days
     return total
-
 
 
 # async def milvus_vector_store(self) -> Optional[MilvusVectorStore]:
