@@ -2,6 +2,7 @@
 # litellm._turn_on_debug()
 import asyncio
 from collections import deque, defaultdict
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Deque, Type, Optional, Tuple
 from llama_index.core.storage.chat_store.base_db import MessageStatus
@@ -46,6 +47,13 @@ class QueryEngineException(Exception):
 class ResourcesInitializedError(QueryEngineException):
     """Failed to initialization of the error or api calls"""
     pass
+
+@dataclass
+class QueryResult:
+    ok: bool
+    data: Optional[str] = None
+    error: Optional[str] = None
+
 
 class FlowState(BaseModel):
     input_user_id: str = ""
@@ -121,23 +129,50 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         async with self._lock:
             validate=self._validate_resources()
             vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
-            if validate:
-                try:
-                    index = VectorStoreIndex.from_vector_store(
-                        vector_store=vector_store,embed_model=embed_model,use_async=True
-                    )
-                    query_engine = index.as_query_engine(
-                        llm=llm_for_rag,
-                        vector_store_query_mode="hybrid",
-                        similarity_top_k=7,
-                        use_async=True,
-                    )
-                    retrieved_query = await query_engine.aquery(input_message)
-                    return retrieved_query.response
-                except Exception as e:
-                    return None
-            else:
+            if not validate:
                 return None
+
+            try:
+                index = VectorStoreIndex.from_vector_store(
+                    vector_store=vector_store,embed_model=embed_model,use_async=True
+                )
+                query_engine = index.as_query_engine(
+                    llm=llm_for_rag,
+                    vector_store_query_mode="hybrid",
+                    similarity_top_k=7,
+                    use_async=True,
+                )
+                retrieved_query = await query_engine.aquery(input_message)
+                return retrieved_query.response
+            except Exception as e:
+                print(f"Error in Query Engine: {e}")
+                return None
+
+    async def query_engine_core_v1(self, input_message: str) -> QueryResult:
+
+        async with self._lock:
+            if not self._validate_resources():
+                return QueryResult(ok=False, error="resources_not_valid")
+
+            try:
+                vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
+
+                # ... build engine, run query ...
+                index = VectorStoreIndex.from_vector_store(
+                    vector_store=vector_store, embed_model=embed_model, use_async=True
+                )
+                query_engine = index.as_query_engine(
+                    llm=llm_for_rag,
+                    vector_store_query_mode="hybrid",
+                    similarity_top_k=7,
+                    use_async=True,
+                )
+                retrieved_query = await query_engine.aquery(input_message)
+                return QueryResult(ok=True, data=retrieved_query.response)
+            except (ImportError, MilvusException, AioRpcError) as e1:
+                return QueryResult(ok=False, error=f"vector_error:{e1!s}")
+            except Exception as e2:
+                return QueryResult(ok=False, error=f"unexpected:{e2!s}")
 
     @start()
     def starting_with_prompt(self):
@@ -154,6 +189,42 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         {self.state.input_user_message}
         """
         return prompt_for_query
+
+
+    @listen(starting_with_prompt)
+    async def send_data_to_query_engine(self, data_from_previous):
+        prompt = data_from_previous
+        response = await self.query_engine_core(input_message=prompt)
+
+        if response:
+            self.state.user_message_v1 = response
+            return "PASSED"
+        else:
+            self.state.user_message_v1 = "Failed to fetch data from vector"
+            return "FAILED"
+
+    @router(send_data_to_query_engine)
+    def error_handling(self, data_from_previous):
+        response = data_from_previous
+        if response == "PASSED":
+            return "PASSED"
+        else:
+            return "FAILED"
+
+    @listen("PASSED")
+    def value_preserved(self):
+        return self.state.user_message_v1
+
+    @listen("FAILED")
+    def value_failure(self):
+        return None
+
+
+
+
+
+
+
 
 
     @listen(starting_with_prompt)

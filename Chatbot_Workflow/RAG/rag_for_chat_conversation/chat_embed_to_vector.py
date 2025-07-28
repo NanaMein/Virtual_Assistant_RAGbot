@@ -48,7 +48,8 @@ from llama_index.core.extractors import (
 )
 from llama_index.core.ingestion import IngestionPipeline
 from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
-    GetMilvusVectorStore
+    GetMilvusVectorStore,
+    VectorObjectResult
 )
 
 
@@ -104,10 +105,10 @@ class ChatConversationVectorCache:
 
 
     async def _validating_resources(self) -> bool:
-        vector_store = await self._get.zilliz_vector_cloud()
-        if not vector_store:
-            print("Vector error")
-            return False
+        vector_object = await self._get.zilliz_vector_cloud()
+
+        if vector_object.ok:
+            return True
 
         else:
             try:
@@ -117,16 +118,18 @@ class ChatConversationVectorCache:
                 print(f"Internal Cache Error: {e}")
                 return False
 
+
     async def resources(self) -> Tuple[MilvusVectorStore, CohereEmbedding, LlamaGroq, bool]:
         """
         returns:
             Vector store, Embed Model, and LLM
         """
-        vector = await self._get.zilliz_vector_cloud()
+        vector_object = await self._get.zilliz_vector_cloud()
         embed, llm = await self._internal_cache()
         validation = await self._validating_resources()
+        vector_store = vector_object.data
 
-        return vector, embed, llm, validation
+        return vector_store, embed, llm, validation
 
 
 

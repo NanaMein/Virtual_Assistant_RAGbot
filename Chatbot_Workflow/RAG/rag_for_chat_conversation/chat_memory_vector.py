@@ -5,6 +5,7 @@ from llama_index.vector_stores.milvus.utils import BGEM3SparseEmbeddingFunction
 from dotenv import load_dotenv
 from cachetools import TTLCache, cached
 from pymilvus import MilvusException, MilvusClient
+from dataclasses import dataclass
 import grpc
 import os
 from grpc.aio import AioRpcError
@@ -12,16 +13,17 @@ from grpc.aio import AioRpcError
 
 load_dotenv()
 
+from dataclasses import dataclass
+from typing import Optional
 
-# class ZillizCloudError(Exception):
-#     """Main errors for all related to zilliz cloud"""
-#     pass
-#
-# class ZillizCommonError(ZillizCloudError):
-#     pass
-#
-# class ZillizUnexpectedError(ZillizCloudError):
-#     pass
+
+@dataclass
+class VectorObjectResult:
+    ok: bool
+    data: Optional[MilvusVectorStore] = None
+    error: Optional[str] = None
+
+
 
 class GetMilvusVectorStore:
     """
@@ -129,20 +131,22 @@ class GetMilvusVectorStore:
         return await self._vector()
 
 
-    async def zilliz_vector_cloud(self) -> Optional[MilvusVectorStore]:
+    async def zilliz_vector_cloud(self) -> VectorObjectResult:
         """Uses refresh and reconnect if an error occurred in vector function.
         Then raise error if an unexpected error occur"""
         try:
             refreshed_vector = await self._refresh_and_get_vector()
-            return refreshed_vector
+            return VectorObjectResult(ok=True, data=refreshed_vector)
 
         except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as ce:
-            print(f"Catching common error in vector: {ce}")
-            return None
+            common_error = f"Catching common error in vector: {ce}\n\nUser_id = {self.user_id}"
+            return VectorObjectResult(ok=False, error=common_error)
+
         except Exception as ex:
-            print(f"Catching unexpected error in vector: {ex}\n"
-                  f"Error type: {type(ex)}")
-            return None
+            unexpected_error = (f"Catching unexpected error in vector: {ex}"
+                                f"\nUser_id = {self.user_id}"
+                                f"\nError type: {type(ex)}")
+            return VectorObjectResult(ok=False, error=unexpected_error)
 
 
 def ttl_conversion_to_day(number_of_days: float):
