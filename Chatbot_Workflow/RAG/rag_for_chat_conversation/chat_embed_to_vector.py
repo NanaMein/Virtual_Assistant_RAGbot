@@ -162,7 +162,7 @@ class ChatConversationVectorCache:
 
             vector_object = await self._get.zilliz_vector_cloud()
             if not vector_object.ok:
-                error = vector_object.error
+                error = f"""Error In embed layer. possible error found in vector => {vector_object.error}"""
                 return IngestionPipelineResult(ok=False, error=error)
 
             else:
@@ -192,13 +192,7 @@ class ChatConversationVectorCache:
     ) -> DocumentProcessingResult:
 
         async with self._lock:
-
-
-
             try:
-                # vector_store, embed_model, llm, validation = await self.resources()
-                # if not validation:
-                #     return False
                 result: IngestionPipelineResult[DataResources] = await self.resources_with_validation()
                 if not result.ok:
                     error = result.error

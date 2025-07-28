@@ -49,7 +49,11 @@ load_dotenv()
 #     """Failed to initialization of the error or api calls"""
 #     pass
 
-
+@dataclass(frozen=True)
+class FlowObjectResult:
+    ok: bool
+    final_response: Optional[str] = None
+    error: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -58,33 +62,35 @@ class QueryResult:
     query_response: Optional[str] = None
     error: Optional[str] = None
 
-dataclass(frozen=True)
-class DataResources:
-    pass
+# dataclass(frozen=True)
+# class DataResources:
+#     pass
 
 class FlowState(BaseModel):
-    input_user_id: str = ""
     input_user_message: str = ""
     user_message_v1: str = ""
-    index: Optional[VectorStoreIndex] = PrivateAttr(default=None)
+    user_message_ready_for_llm: str = ""
+    output_message: str = ""
+    current_error_message: str = ""
 
 
 class ChatHistoryQueryEngine(Flow[FlowState]):
 
     _caching_resources = TTLCache(maxsize=100, ttl=3600)
 
-    def __init__(self):
-        self._lock = asyncio.Lock()
-        self._vector_class = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
-        self._embeddings = ChatConversationVectorCache(user_id=self.state.input_user_id)
+    def __init__(self, input_user_id: str, **kwargs):
+        self.input_user_id: str = input_user_id
+        self._qe_lock = asyncio.Lock()
+        self._res_lock = asyncio.Lock()
+        self._vector_class = GetMilvusVectorStore(input_user_id=self.input_user_id)
+        self.chat_history = ChatConversationVectorCache(user_id=self.input_user_id)
 
-        super().__init__()
+        super().__init__(**kwargs)
 
 
     async def _llm_and_embed_resources(self) -> Tuple[CohereEmbedding, Llama_Groq]:
-        async with self._lock:
-            user_id = self.state.input_user_id
-            _cached_resources = self._caching_resources.get(user_id)
+        async with self._res_lock:
+            _cached_resources = self._caching_resources.get(self.input_user_id)
 
             if isinstance(_cached_resources, tuple) and len(_cached_resources) == 2:
                 embed_model, llm_for_rag = _cached_resources
@@ -100,14 +106,14 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                 api_key=os.getenv("CLIENT_GROQ_API_1"),
                 temperature=0.3
             )
-            self._caching_resources.pop(user_id, None)
+            self._caching_resources.pop(self.input_user_id, None)
             self._caching_resources.expire()
-            self._caching_resources[user_id] = (embed_model, llm_for_rag)
+            self._caching_resources[self.input_user_id] = (embed_model, llm_for_rag)
             return embed_model, llm_for_rag
 
-    async def query_engine_core(self, input_message: str) -> QueryResult:
+    async def main_query_engine_core(self, input_message: str) -> QueryResult:
 
-        async with self._lock:
+        async with self._qe_lock:
             result_of_object = await self._vector_class.get_zilliz_vector_result()
 
             if not result_of_object.ok:
@@ -123,8 +129,6 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                 return QueryResult(ok=False, error=resources_error)
 
             try:
-
-                # ... build engine, run query ...
                 index = VectorStoreIndex.from_vector_store(
                     vector_store=vector_store, embed_model=embed_model, use_async=True
                 )
@@ -137,11 +141,11 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                 retrieved_query = await query_engine.aquery(input_message)
                 return QueryResult(ok=True, query_response=retrieved_query.response)
 
-            except (ImportError, MilvusException, AioRpcError) as e1:
-                return QueryResult(ok=False, error=f"Common Error occur: {e1!s}")
+            except (ImportError, MilvusException, AioRpcError, UnboundLocalError) as e1:
+                return QueryResult(ok=False, error=f"Common Error occur: {e1}")
 
             except Exception as e2:
-                return QueryResult(ok=False, error=f"Unexpected Error for Llama Index: {e2!s}")
+                return QueryResult(ok=False, error=f"Unexpected Error for Llama Index: {e2}")
 
     @start()
     def starting_with_prompt(self):
@@ -157,88 +161,66 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         ### User:
         {self.state.input_user_message}
         """
-        return prompt_for_query
+        self.state.user_message_v1 = prompt_for_query
 
-
-    @listen(starting_with_prompt)
-    async def send_data_to_query_engine(self, data_from_previous):
-        prompt = data_from_previous
-        result = await self.query_engine_core(input_message=prompt)
-
-        if result.ok:
-            self.state.user_message_v1 = result.query_response
-            return "PASSED"
-        else:
-            self.state.user_message_v1 = result.error
-            return "FAILED"
-
-    @router(send_data_to_query_engine)
-    def error_handling(self, data_from_previous):
-        response = data_from_previous
-        if response == "PASSED":
-            return "PASSED"
-        else:
-            return "FAILED"
-
-    @listen("PASSED")
-    async def value_preserved(self):
-        mem = await self._embeddings.add_conversation_with_extractor(
-            input_user_message=self.state.input_user_message,
-            input_assistant_message=self.state.user_message_v1
-        )
-        if mem.ok:
-            return self.state.user_message_v1
-        else:
-            return mem.error
-
-    @listen("FAILED")
-    def value_failure(self):
-        return self.state.user_message_v1
-
-
-
-
-
-
-
-
-
-    @listen(starting_with_prompt)
-    async def initiate_logics(self, data_from_previous):
-        prompt = data_from_previous
-        vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
-
-        index = VectorStoreIndex.from_vector_store(
-            vector_store=vector_store,
-            embed_model=embed_model,
-            use_async=True
-        )
-        self.state.holding_index = index
-        return prompt, index
 
     @router(starting_with_prompt)
-    async def error_handling(self):
-        try:
-            embed_model, _ = await self.llm_and_embed_resources()
-            vector_store = await self.milvus_vector_store()
-            return "success"
+    async def query_to_vector_with_error_handling(self, data_from_previous):
 
-        except ZillizCloudConnectionError:
-            return "failed"
+        result = await self.main_query_engine_core(input_message=self.state.user_message_v1)
 
-    @listen(initiate_logics)
-    async def query_engine(self, data_from_previous):
+        if result.ok:
+            self.state.output_message = result.query_response
+            return "QUERY_PASSED"
+        else:
+            failed_query = """
+            One or few reasons why no retrieved context or chat history:
+            1. No conversation yet
+            2. No saved chat conversation
+            3. Cleared chat history
+            4. Error in Api calls to vector, embed, and llm"""
 
-        prompt, index = data_from_previous
-        _, llm = await self.llm_and_embed_resources()
-        query_engine = index.as_query_engine(
-            llm=llm,
-            vector_store_query_mode="hybrid",
-            similarity_top_k=7,
-            use_async=True,
+            return "QUERY_FAILED"
+
+    @listen("QUERY_FAILED")
+    def query_failed(self):
+        error = self.state.output_message
+        return FlowObjectResult(ok=False, error=error)
+
+    @listen("QUERY_PASSED")
+    async def query_passed(self):
+        result = await self.chat_history.add_conversation_with_extractor(
+            input_user_message=self.state.input_user_message,
+            input_assistant_message=self.state.output_message
         )
-        query_eng = self.state.holding_index.as_query_engine()
+        if not result.ok:
+            self.state.current_error_message = result.error
 
-        response = await query_engine.aquery(prompt)
-        return response
+        return result
+
+    @router(query_passed)
+    def saving_chat_validation(self, _data):
+        result = _data
+        if result.ok:
+            return "SAVING_PASSED"
+        else:
+            return "SAVING_FAILED"
+
+    @listen("SAVING_PASSED")
+    def saving_passed(self):
+        output_data = self.state.output_message
+        return FlowObjectResult(ok=True, final_response=output_data)
+
+    @listen("SAVING_FAILED")
+    def saving_failed(self):
+        error = self.state.current_error_message
+        return FlowObjectResult(ok=False, error=error)
+
+
+
+
+
+
+
+
 
