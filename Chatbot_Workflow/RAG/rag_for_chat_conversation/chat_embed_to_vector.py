@@ -56,24 +56,10 @@ from dataclasses import dataclass
 
 load_dotenv()
 
-
-#
-# class IngestionPipelineError(Exception):
-#     """Failure in processing the documents to saving in vector"""
-#     pass
-#
-# class DocumentTransformingError(IngestionPipelineError):
-#     """Error in document processing"""
-#     pass
-#
-# class InitializedResourcesError(IngestionPipelineError):
-#     """Error occurring in the embed or llm"""
-#     pass
-
 T = TypeVar("T")
 
 @dataclass(frozen=True)
-class IngestionPipelineResult(Generic[T]):
+class ResourcesResult(Generic[T]):
     ok: bool
     data: Optional[T] = None
     error: Optional[str] = None
@@ -95,7 +81,7 @@ class ChatConversationVectorCache:
 
     def __init__(self, user_id: str):
         self.user_id:str = user_id
-        self._get = GetMilvusVectorStore(input_user_id=self.user_id)
+        self._i_will = GetMilvusVectorStore(input_user_id=self.user_id)
         self._lock = asyncio.Lock()
 
     async def _internal_cache(self) -> Optional[Tuple[CohereEmbedding, LlamaGroq]]:
@@ -122,53 +108,33 @@ class ChatConversationVectorCache:
             self._cache[self.user_id] = embed_model, llm
             return embed_model, llm
 
-
-    async def _validating_resources(self) -> bool:
-        vector_object = await self._get.zilliz_vector_cloud()
-
-        if not vector_object.ok:
-            return False
-
-        else:
-            try:
-                await self._internal_cache()
-                return True
-            except Exception as e:
-                print(f"Internal Cache Error: {e}")
-                return False
-
-
-    async def resources(self) -> Tuple[MilvusVectorStore, CohereEmbedding, LlamaGroq, bool]:
-        """
-        returns:
-            Vector store, Embed Model, and LLM
-        """
-        vector_object = await self._get.zilliz_vector_cloud()
-        embed, llm = await self._internal_cache()
-        validation = await self._validating_resources()
-        vector_store = vector_object.data
-
-        return vector_store, embed, llm, validation
-
-
-    async def resources_with_validation(self)-> IngestionPipelineResult:
+    async def resources_with_validation(self)-> ResourcesResult:
         async with self._lock:
             try:
                 embed, llm = await self._internal_cache()
-            except Exception as e:
-                error = f"Unexpected error in resources: {e}"
-                return IngestionPipelineResult(ok=False, error=error)
+            except Exception as ex:
+                unexpected_error = f"""
+                Error Originate From: Embedding to Vector Layer\n
+                Status: Unexpected error: {ex}\n
+                Additional Information: Error type is {type(ex)}
+                Solution: Restart system or debug and test the program
+                """
+                return ResourcesResult(ok=False, error=unexpected_error)
 
 
-            vector_object = await self._get.zilliz_vector_cloud()
-            if not vector_object.ok:
-                error = f"""Error In embed layer. possible error found in vector => {vector_object.error}"""
-                return IngestionPipelineResult(ok=False, error=error)
+            vector_result = await self._i_will.get_zilliz_vector_result()
+            if not vector_result.ok:
+                error = f"""
+                Error Originate From: Vector Layer\n
+                Status: Catching common or unexpected error\n
+                Solution: Retry or wait for a moment before proceeding
+                Original Error: \n{vector_result.error}"""
+                return ResourcesResult(ok=False, error=error)
 
             else:
-                vector_store = vector_object.data
+                vector_store = vector_result.data
                 data = DataResources(vector_store=vector_store, embed_model=embed, llm_for_rag=llm)
-                return IngestionPipelineResult(ok=True, data=data)
+                return ResourcesResult(ok=True, data=data)
 
 
 
@@ -187,20 +153,25 @@ class ChatConversationVectorCache:
 
 
     async def add_conversation_with_extractor(
-        self, input_user_message: str,
-        input_assistant_message: str
+        self, input_user_message: str = None,
+        input_assistant_message: str = None
     ) -> DocumentProcessingResult:
 
         async with self._lock:
             try:
-                result: IngestionPipelineResult[DataResources] = await self.resources_with_validation()
+                result: ResourcesResult[DataResources] = await self.resources_with_validation()
                 if not result.ok:
-                    error = result.error
+                    error= f"""This is Embedding layer. Original error is: \n{result.error}"""
                     return DocumentProcessingResult(ok=False, error=error)
 
                 vector_store = result.data.vector_store
                 embed_model = result.data.embed_model
                 llm = result.data.llm_for_rag
+
+                if not input_user_message or not input_assistant_message:
+                    error = """an input message from user and assistant is missing from the parameter"""
+                    return DocumentProcessingResult(ok=False, error=error)
+
 
                 user = f"<conversation_turn>role=user content={input_user_message} "
                 assistant = f" role=assistant content={input_assistant_message}</conversation_turn>"

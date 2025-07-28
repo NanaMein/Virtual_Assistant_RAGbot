@@ -173,7 +173,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             self.state.output_message = result.query_response
             return "QUERY_PASSED"
         else:
-            failed_query = """
+            self.state.output_message = """
             One or few reasons why no retrieved context or chat history:
             1. No conversation yet
             2. No saved chat conversation
@@ -196,12 +196,12 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         if not result.ok:
             self.state.current_error_message = result.error
 
-        return result
+        return result.ok
 
     @router(query_passed)
     def saving_chat_validation(self, _data):
-        result = _data
-        if result.ok:
+        result_ok = _data
+        if result_ok:
             return "SAVING_PASSED"
         else:
             return "SAVING_FAILED"

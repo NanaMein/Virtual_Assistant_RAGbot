@@ -132,23 +132,6 @@ class GetMilvusVectorStore:
         return await self._vector()
 
 
-    async def zilliz_vector_cloud(self) -> VectorObjectResult:
-        """Uses refresh and reconnect if an error occurred in vector function.
-        Then raise error if an unexpected error occur"""
-        try:
-            refreshed_vector = await self._refresh_and_get_vector()
-            return VectorObjectResult(ok=True, data=refreshed_vector)
-
-        except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as ce:
-            common_error = f"Catching common error in vector: {ce}\n\nUser_id = {self.user_id}"
-            return VectorObjectResult(ok=False, error=common_error)
-
-        except Exception as ex:
-            unexpected_error = (f"Catching unexpected error in vector: {ex}"
-                                f"\nUser_id = {self.user_id}"
-                                f"\nError type: {type(ex)}")
-            return VectorObjectResult(ok=False, error=unexpected_error)
-
     async def get_zilliz_vector_result(self) -> VectorObjectResult:
         """Uses refresh and reconnect if an error occurred in vector function.
         Then raise error if an unexpected error occur"""
@@ -157,33 +140,24 @@ class GetMilvusVectorStore:
             return VectorObjectResult(ok=True, data=refreshed_vector)
 
         except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as ce:
-            common_error = f"Catching common error in vector: {ce}\n\nUser_id = {self.user_id}"
+            common_error = f"""
+            Error Originate From: Vector Layer\n
+            Status: Catching common error: {ce}\n
+            Additional Information: Error type is {type(ce)}
+            Solution: Retry or wait for a moment before proceeding
+            Original Error: """
             return VectorObjectResult(ok=False, error=common_error)
 
         except Exception as ex:
-            unexpected_error = (f"Catching unexpected error in vector: {ex}"
-                                f"\nUser_id = {self.user_id}"
-                                f"\nError type: {type(ex)}")
+            unexpected_error = f"""
+            Error Originate From: Vector Layer\n
+            Status: Unexpected error: {ex}\n
+            Additional Information: Error type is {type(ex)}
+            Solution: Restart system or debug and test the program
+            """
+
             return VectorObjectResult(ok=False, error=unexpected_error)
 
 def ttl_conversion_to_day(number_of_days: float):
     total = 86400 * number_of_days
     return total
-
-
-# async def milvus_vector_store(self) -> Optional[MilvusVectorStore]:
-#     for attempt in range(2):
-#         try:
-#             return await self._vector()
-#
-#         except (AioRpcError, UnboundLocalError, ImportError, MilvusException):
-#             async with self._client_lock:
-#                 self._client_cache.pop(self.user_id, None)
-#                 self._client_cache.expire()
-#                 self._client_init = None
-#             async with self._vector_lock:
-#                 self._vector_cache.pop(self.user_id, None)
-#                 self._vector_cache.expire()
-#                 self._vector_init = None
-#
-#     raise ZillizCloudConnectionError("Unexpected Error occurred, please try again later")
