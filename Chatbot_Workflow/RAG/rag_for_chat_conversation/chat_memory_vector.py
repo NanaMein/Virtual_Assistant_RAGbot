@@ -1,5 +1,5 @@
 import asyncio
-from typing import Deque, Type, Optional, Tuple, Union
+from typing import Deque, Type, Optional, Tuple, Union, TypeVar, Generic
 from llama_index.vector_stores.milvus import MilvusVectorStore
 from llama_index.vector_stores.milvus.utils import BGEM3SparseEmbeddingFunction
 from dotenv import load_dotenv
@@ -10,17 +10,18 @@ import grpc
 import os
 from grpc.aio import AioRpcError
 
-
 load_dotenv()
 
-from dataclasses import dataclass
-from typing import Optional
 
+T = TypeVar("T")
+@dataclass(frozen=True)
+class VectorObjectResult(Generic[T]):
+    """ok: bool => If data is Ok or not\n
+    data: Optional[T] => Data to be passed on\n
+    error: Optional[str] => error traceback """
 
-@dataclass
-class VectorObjectResult:
     ok: bool
-    data: Optional[MilvusVectorStore] = None
+    data: Optional[T] = None
     error: Optional[str] = None
 
 
@@ -148,6 +149,22 @@ class GetMilvusVectorStore:
                                 f"\nError type: {type(ex)}")
             return VectorObjectResult(ok=False, error=unexpected_error)
 
+    async def get_zilliz_vector_result(self) -> VectorObjectResult:
+        """Uses refresh and reconnect if an error occurred in vector function.
+        Then raise error if an unexpected error occur"""
+        try:
+            refreshed_vector = await self._refresh_and_get_vector()
+            return VectorObjectResult(ok=True, data=refreshed_vector)
+
+        except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as ce:
+            common_error = f"Catching common error in vector: {ce}\n\nUser_id = {self.user_id}"
+            return VectorObjectResult(ok=False, error=common_error)
+
+        except Exception as ex:
+            unexpected_error = (f"Catching unexpected error in vector: {ex}"
+                                f"\nUser_id = {self.user_id}"
+                                f"\nError type: {type(ex)}")
+            return VectorObjectResult(ok=False, error=unexpected_error)
 
 def ttl_conversion_to_day(number_of_days: float):
     total = 86400 * number_of_days

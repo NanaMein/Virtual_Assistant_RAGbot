@@ -4,7 +4,7 @@ import asyncio
 from collections import deque, defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Deque, Type, Optional, Tuple
+from typing import Deque, Type, Optional, Tuple, TypeVar, Generic
 from llama_index.core.storage.chat_store.base_db import MessageStatus
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
@@ -37,23 +37,30 @@ from grpc import RpcError
 
 
 from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore
+from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_embed_to_vector import ChatConversationVectorCache
 load_dotenv()
 
 
-class QueryEngineException(Exception):
-    """Error happens in Query engine"""
-    pass
+# class QueryEngineException(Exception):
+#     """Error happens in Query engine"""
+#     pass
+#
+# class ResourcesInitializedError(QueryEngineException):
+#     """Failed to initialization of the error or api calls"""
+#     pass
 
-class ResourcesInitializedError(QueryEngineException):
-    """Failed to initialization of the error or api calls"""
-    pass
 
-@dataclass
+
+
+@dataclass(frozen=True)
 class QueryResult:
     ok: bool
-    data: Optional[str] = None
+    query_response: Optional[str] = None
     error: Optional[str] = None
 
+dataclass(frozen=True)
+class DataResources:
+    pass
 
 class FlowState(BaseModel):
     input_user_id: str = ""
@@ -67,25 +74,20 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
     _caching_resources = TTLCache(maxsize=100, ttl=3600)
 
     def __init__(self):
-        self._vector_store: Optional[MilvusVectorStore] = None
-        self._vector_resources: Optional[GetMilvusVectorStore] = None
         self._lock = asyncio.Lock()
+        self._vector_class = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
+        self._embeddings = ChatConversationVectorCache(user_id=self.state.input_user_id)
 
         super().__init__()
 
-    @property
-    def vector_resource_is(self) -> GetMilvusVectorStore:
-        if self._vector_resources is None:
-            self._vector_resources = GetMilvusVectorStore(input_user_id=self.state.input_user_id)
-        return self._vector_resources
 
     async def _llm_and_embed_resources(self) -> Tuple[CohereEmbedding, Llama_Groq]:
         async with self._lock:
             user_id = self.state.input_user_id
-            validate = self._caching_resources.get(user_id)
+            _cached_resources = self._caching_resources.get(user_id)
 
-            if isinstance(validate, tuple) and len(validate) == 2:
-                embed_model, llm_for_rag = validate
+            if isinstance(_cached_resources, tuple) and len(_cached_resources) == 2:
+                embed_model, llm_for_rag = _cached_resources
                 return embed_model, llm_for_rag
 
             embed_model = CohereEmbedding(
@@ -103,59 +105,24 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             self._caching_resources[user_id] = (embed_model, llm_for_rag)
             return embed_model, llm_for_rag
 
-    async def _validate_resources(self) -> bool:
-        vector = await self.vector_resource_is.zilliz_vector_cloud()
-        if not vector:
-            return False
+    async def query_engine_core(self, input_message: str) -> QueryResult:
 
-        else:
+        async with self._lock:
+            result_of_object = await self._vector_class.get_zilliz_vector_result()
+
+            if not result_of_object.ok:
+                return QueryResult(ok=False, error=result_of_object.error)
+
+            vector_store = result_of_object.data
+
             try:
                 embed_model, llm_for_rag = await self._llm_and_embed_resources()
-                return True
             except Exception as e:
-                return False
-
-    async def init_query_engine_resources(self)-> Optional[Tuple[MilvusVectorStore, CohereEmbedding, Llama_Groq]]:
-        vector_store = await self.vector_resource_is.zilliz_vector_cloud()
-
-        embed_model, llm_for_rag = await self._llm_and_embed_resources()
-        validation = await self._validate_resources()
-        if validation:
-            return vector_store, embed_model, llm_for_rag
-        else:
-            return None, None, None
-
-    async def query_engine_core(self, input_message: str) -> Optional[str]:
-        async with self._lock:
-            validate=self._validate_resources()
-            vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
-            if not validate:
-                return None
+                resources_error = f"""Unexpected Error in initialization of llm and embed:\n
+                Error Type is {type(e)} and error traceback is: {e}"""
+                return QueryResult(ok=False, error=resources_error)
 
             try:
-                index = VectorStoreIndex.from_vector_store(
-                    vector_store=vector_store,embed_model=embed_model,use_async=True
-                )
-                query_engine = index.as_query_engine(
-                    llm=llm_for_rag,
-                    vector_store_query_mode="hybrid",
-                    similarity_top_k=7,
-                    use_async=True,
-                )
-                retrieved_query = await query_engine.aquery(input_message)
-                return retrieved_query.response
-            except Exception as e:
-                print(f"Error in Query Engine: {e}")
-                return None
-
-    async def query_engine_core_v1(self, input_message: str) -> QueryResult:
-
-        async with self._lock:
-            if not self._validate_resources():
-                return QueryResult(ok=False, error="resources_not_valid")
-
-            try:
-                vector_store, embed_model, llm_for_rag = await self.init_query_engine_resources()
 
                 # ... build engine, run query ...
                 index = VectorStoreIndex.from_vector_store(
@@ -168,11 +135,13 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                     use_async=True,
                 )
                 retrieved_query = await query_engine.aquery(input_message)
-                return QueryResult(ok=True, data=retrieved_query.response)
+                return QueryResult(ok=True, query_response=retrieved_query.response)
+
             except (ImportError, MilvusException, AioRpcError) as e1:
-                return QueryResult(ok=False, error=f"vector_error:{e1!s}")
+                return QueryResult(ok=False, error=f"Common Error occur: {e1!s}")
+
             except Exception as e2:
-                return QueryResult(ok=False, error=f"unexpected:{e2!s}")
+                return QueryResult(ok=False, error=f"Unexpected Error for Llama Index: {e2!s}")
 
     @start()
     def starting_with_prompt(self):
@@ -194,13 +163,13 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
     @listen(starting_with_prompt)
     async def send_data_to_query_engine(self, data_from_previous):
         prompt = data_from_previous
-        response = await self.query_engine_core(input_message=prompt)
+        result = await self.query_engine_core(input_message=prompt)
 
-        if response:
-            self.state.user_message_v1 = response
+        if result.ok:
+            self.state.user_message_v1 = result.query_response
             return "PASSED"
         else:
-            self.state.user_message_v1 = "Failed to fetch data from vector"
+            self.state.user_message_v1 = result.error
             return "FAILED"
 
     @router(send_data_to_query_engine)
@@ -212,12 +181,19 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             return "FAILED"
 
     @listen("PASSED")
-    def value_preserved(self):
-        return self.state.user_message_v1
+    async def value_preserved(self):
+        mem = await self._embeddings.add_conversation_with_extractor(
+            input_user_message=self.state.input_user_message,
+            input_assistant_message=self.state.user_message_v1
+        )
+        if mem.ok:
+            return self.state.user_message_v1
+        else:
+            return mem.error
 
     @listen("FAILED")
     def value_failure(self):
-        return None
+        return self.state.user_message_v1
 
 
 

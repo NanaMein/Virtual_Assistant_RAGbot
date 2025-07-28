@@ -3,7 +3,7 @@
 import asyncio
 from collections import deque, defaultdict
 from functools import lru_cache
-from typing import Deque, Type, Optional, Tuple
+from typing import Deque, Type, Optional, Tuple, Any, TypeVar, Generic
 from llama_index.core.storage.chat_store.base_db import MessageStatus
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
@@ -51,6 +51,7 @@ from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
     GetMilvusVectorStore,
     VectorObjectResult
 )
+from dataclasses import dataclass
 
 
 load_dotenv()
@@ -69,6 +70,24 @@ load_dotenv()
 #     """Error occurring in the embed or llm"""
 #     pass
 
+T = TypeVar("T")
+
+@dataclass(frozen=True)
+class IngestionPipelineResult(Generic[T]):
+    ok: bool
+    data: Optional[T] = None
+    error: Optional[str] = None
+
+@dataclass(frozen=True)
+class DocumentProcessingResult:
+    ok: bool
+    error: Optional[str] = None
+
+@dataclass(frozen=True)
+class DataResources:
+    vector_store: MilvusVectorStore
+    embed_model: CohereEmbedding
+    llm_for_rag: LlamaGroq
 
 class ChatConversationVectorCache:
 
@@ -107,8 +126,8 @@ class ChatConversationVectorCache:
     async def _validating_resources(self) -> bool:
         vector_object = await self._get.zilliz_vector_cloud()
 
-        if vector_object.ok:
-            return True
+        if not vector_object.ok:
+            return False
 
         else:
             try:
@@ -132,6 +151,26 @@ class ChatConversationVectorCache:
         return vector_store, embed, llm, validation
 
 
+    async def resources_with_validation(self)-> IngestionPipelineResult:
+        async with self._lock:
+            try:
+                embed, llm = await self._internal_cache()
+            except Exception as e:
+                error = f"Unexpected error in resources: {e}"
+                return IngestionPipelineResult(ok=False, error=error)
+
+
+            vector_object = await self._get.zilliz_vector_cloud()
+            if not vector_object.ok:
+                error = vector_object.error
+                return IngestionPipelineResult(ok=False, error=error)
+
+            else:
+                vector_store = vector_object.data
+                data = DataResources(vector_store=vector_store, embed_model=embed, llm_for_rag=llm)
+                return IngestionPipelineResult(ok=True, data=data)
+
+
 
 
     @staticmethod
@@ -150,15 +189,25 @@ class ChatConversationVectorCache:
     async def add_conversation_with_extractor(
         self, input_user_message: str,
         input_assistant_message: str
-    ) -> bool:
+    ) -> DocumentProcessingResult:
 
         async with self._lock:
 
-            vector_store, embed_model, llm, validation = await self.resources()
-            if not validation:
-                return False
+
 
             try:
+                # vector_store, embed_model, llm, validation = await self.resources()
+                # if not validation:
+                #     return False
+                result: IngestionPipelineResult[DataResources] = await self.resources_with_validation()
+                if not result.ok:
+                    error = result.error
+                    return DocumentProcessingResult(ok=False, error=error)
+
+                vector_store = result.data.vector_store
+                embed_model = result.data.embed_model
+                llm = result.data.llm_for_rag
+
                 user = f"<conversation_turn>role=user content={input_user_message} "
                 assistant = f" role=assistant content={input_assistant_message}</conversation_turn>"
 
@@ -188,7 +237,8 @@ class ChatConversationVectorCache:
                     use_async=True
                 )
                 await index.ainsert_nodes(nodes=_nodes)
-                return True
+                return DocumentProcessingResult(ok=True)
 
             except Exception as e:
-                return False
+                error = f"Unexpected error in Document processing: {e}"
+                return DocumentProcessingResult(ok=False, error=error)
