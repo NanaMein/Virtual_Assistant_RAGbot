@@ -57,7 +57,7 @@ class FlowObjectResult:
 
 
 @dataclass(frozen=True)
-class QueryResult:
+class QueryEngineResult:
     ok: bool
     query_response: Optional[str] = None
     error: Optional[str] = None
@@ -111,13 +111,13 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             self._caching_resources[self.input_user_id] = (embed_model, llm_for_rag)
             return embed_model, llm_for_rag
 
-    async def main_query_engine_core(self, input_message: str) -> QueryResult:
+    async def main_query_engine_core(self, input_message: str) -> QueryEngineResult:
 
         async with self._qe_lock:
             result_of_object = await self._vector_class.get_zilliz_vector_result()
 
             if not result_of_object.ok:
-                return QueryResult(ok=False, error=result_of_object.error)
+                return QueryEngineResult(ok=False, error=result_of_object.error)
 
             vector_store = result_of_object.data
 
@@ -126,7 +126,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             except Exception as e:
                 resources_error = f"""Unexpected Error in initialization of llm and embed:\n
                 Error Type is {type(e)} and error traceback is: {e}"""
-                return QueryResult(ok=False, error=resources_error)
+                return QueryEngineResult(ok=False, error=resources_error)
 
             try:
                 index = VectorStoreIndex.from_vector_store(
@@ -139,13 +139,13 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                     use_async=True,
                 )
                 retrieved_query = await query_engine.aquery(input_message)
-                return QueryResult(ok=True, query_response=retrieved_query.response)
+                return QueryEngineResult(ok=True, query_response=retrieved_query.response)
 
             except (ImportError, MilvusException, AioRpcError, UnboundLocalError) as e1:
-                return QueryResult(ok=False, error=f"Common Error occur: {e1}")
+                return QueryEngineResult(ok=False, error=f"Common Error occur: {e1}")
 
             except Exception as e2:
-                return QueryResult(ok=False, error=f"Unexpected Error for Llama Index: {e2}")
+                return QueryEngineResult(ok=False, error=f"Unexpected Error for Llama Index: {e2}")
 
     @start()
     def starting_with_prompt(self):
