@@ -116,11 +116,13 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         async with self._qe_lock:
             result_of_object = await self._vector_class.get_zilliz_vector_result()
 
+            #FIRST CONDITIONAL
             if not result_of_object.ok:
                 return QueryEngineResult(ok=False, error=result_of_object.error)
 
             vector_store = result_of_object.data
 
+            #SECOND CONDITIONAL
             try:
                 embed_model, llm_for_rag = await self._llm_and_embed_resources()
             except Exception as e:
@@ -128,6 +130,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                 Error Type is {type(e)} and error traceback is: {e}"""
                 return QueryEngineResult(ok=False, error=resources_error)
 
+            #THIRD CONDITIONAL
             try:
                 index = VectorStoreIndex.from_vector_store(
                     vector_store=vector_store, embed_model=embed_model, use_async=True

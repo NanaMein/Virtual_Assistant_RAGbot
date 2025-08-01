@@ -54,6 +54,25 @@ from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
 from dataclasses import dataclass
 
 
+T = TypeVar("T")
+
+@dataclass(frozen=True)
+class VectorObjectResult(Generic[T]):
+    """ok: bool\n
+    data: Optional[T] = None[This is the data object]\n
+    err_name: Optional[str] = None[This is the name of the error]\n
+    err_desc: Optional[str] = None[this is the description of the error]\n
+    err_loc: Optional[str] = None[this is the location or where the error occurred]\n
+    opt_err: Optional[str] = None[This is for the optional error like traceback]\n
+    overall_err: @property [This is a read only overall error or combination of other parameters.
+    Used for less boilerplate code and string builder for all error parameters]"""
+
+    ok: bool
+    data: Optional[T] = None
+    err_name: str | None = None
+    err_desc: str | None = None
+    err_loc: str | None = None
+    opt_err: Exception | str | None = None
 load_dotenv()
 
 T = TypeVar("T")
@@ -62,7 +81,19 @@ T = TypeVar("T")
 class ResourcesResult(Generic[T]):
     ok: bool
     data: Optional[T] = None
-    error: Optional[str] = None
+    err_name: str | None = None
+    err_desc: str | None = None
+    err_loc: str | None = None
+    opt_err: Exception | str | None = None
+
+    @property
+    def overall_err(self) -> str:
+        return f"""
+            Error name: {self.err_name}\n
+            Error is: {self.err_desc}\n
+            Error location is: {self.err_loc}\n
+            Optional error traceback: [{self.opt_err}]
+            """
 
 @dataclass(frozen=True)
 class DocumentProcessingResult:
@@ -113,23 +144,29 @@ class ChatConversationVectorCache:
             try:
                 embed, llm = await self._internal_cache()
             except Exception as ex:
-                unexpected_error = f"""
-                Error Originate From: Embedding to Vector Layer\n
-                Status: Unexpected error: {ex}\n
-                Additional Information: Error type is {type(ex)}
-                Solution: Restart system or debug and test the program
-                """
-                return ResourcesResult(ok=False, error=unexpected_error)
+                err_name = "Unexpected Resources Initialization"
+                err_desc = "Unexpected Error occurred. Might take for a while"
+                err_loc = "Chat Embed to Vector Layer"
+                return ResourcesResult(
+                    ok=False,
+                    err_name=err_name,
+                    err_desc=err_desc,
+                    err_loc=err_loc,
+                    opt_err=ex
+                )
 
 
             vector_result = await self._i_will.get_zilliz_vector_result()
             if not vector_result.ok:
-                error = f"""
-                Error Originate From: Vector Layer\n
-                Status: Catching common or unexpected error\n
-                Solution: Retry or wait for a moment before proceeding
-                Original Error: \n{vector_result.error}"""
-                return ResourcesResult(ok=False, error=error)
+                err_name = "Vector Error"
+                err_desc = "Theres a problem in Vector layer, need to check"
+                err_loc = "Chat Embed to Vector"
+                return ResourcesResult(
+                    ok=False,
+                    err_name=err_name,
+                    err_desc=err_desc,
+                    err_loc=err_loc
+                )
 
             else:
                 vector_store = vector_result.data

@@ -14,21 +14,42 @@ load_dotenv()
 
 
 T = TypeVar("T")
+
 @dataclass(frozen=True)
 class VectorObjectResult(Generic[T]):
-    """ok: bool => If data is Ok or not\n
-    data: Optional[T] => Data to be passed on\n
-    error: Optional[str] => error traceback """
+    """ok: bool\n
+    data: Optional[T] = None[This is the data object]\n
+    err_name: Optional[str] = None[This is the name of the error]\n
+    err_desc: Optional[str] = None[this is the description of the error]\n
+    err_loc: Optional[str] = None[this is the location or where the error occurred]\n
+    opt_err: Optional[str] = None[This is for the optional error like traceback]\n
+    overall_err: @property [This is a read only overall error or combination of other parameters.
+    Used for less boilerplate code and string builder for all error parameters]"""
 
     ok: bool
     data: Optional[T] = None
-    error: Optional[str] = None
+    err_name: str | None = None
+    err_desc: str | None = None
+    err_loc: str | None = None
+    opt_err: Exception | str | None = None
+
+    @property
+    def overall_err(self) -> str:
+        return f"""
+        Error name: {self.err_name}\n
+        Error is: {self.err_desc}\n
+        Error location is: {self.err_loc}\n
+        Optional error traceback: [{self.opt_err}]
+        """
+
+
+
 
 
 
 class GetMilvusVectorStore:
     """
-    Asycncronously make a vector connection to zilliz with error handling, lock and reconnection
+    Asynchronously make a vector connection to zilliz with error handling, lock and reconnection
     mechanism by providing a user id to and each user id will have its own vector store
     for chat conversation. It has a time to live of 15 days so it will be clear when certain
     time has passed
@@ -140,23 +161,30 @@ class GetMilvusVectorStore:
             return VectorObjectResult(ok=True, data=refreshed_vector)
 
         except (AioRpcError, MilvusException, UnboundLocalError, ImportError) as ce:
-            common_error = f"""
-            Error Originate From: Vector Layer\n
-            Status: Catching common error: {ce}\n
-            Additional Information: Error type is {type(ce)}
-            Solution: Retry or wait for a moment before proceeding
-            Original Error: """
-            return VectorObjectResult(ok=False, error=common_error)
+            err_name = "Milvus Connection Error"
+            err_desc = f"""Milvus connection or grpc expired connection. 
+            This is a simple bug that can be solved with reconnection or simply waiting for the
+            program to back online."""
+            err_loc = "Chat Memory Vector Layer"
+            return VectorObjectResult(
+                ok=False,
+                err_name=err_name,
+                err_desc=err_desc,
+                err_loc=err_loc,
+                opt_err=ce
+            )
 
         except Exception as ex:
-            unexpected_error = f"""
-            Error Originate From: Vector Layer\n
-            Status: Unexpected error: {ex}\n
-            Additional Information: Error type is {type(ex)}
-            Solution: Restart system or debug and test the program
-            """
-
-            return VectorObjectResult(ok=False, error=unexpected_error)
+            name = "Unexpected Error"
+            desc = """Unexpected error happened. Program will stop for a moment. """
+            loc = "Chat Memory Vector Layer"
+            return VectorObjectResult(
+                ok=False,
+                err_name=name,
+                err_desc=desc,
+                err_loc=loc,
+                opt_err=ex,
+            )
 
 def ttl_conversion_to_day(number_of_days: float):
     total = 86400 * number_of_days
