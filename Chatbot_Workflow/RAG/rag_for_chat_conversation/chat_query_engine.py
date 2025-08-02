@@ -33,45 +33,75 @@ import os
 import pytz
 import time
 from grpc.aio import AioRpcError
-from grpc import RpcError
 
 
 from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import GetMilvusVectorStore
 from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_embed_to_vector import ChatConversationVectorCache
 load_dotenv()
 
+T = TypeVar("T")
+@dataclass(frozen=True)
+class FlowObjectResult(Generic[T]):
+    """
+    ok: [This is if data is Success or Failure]\n
+    data: [This is the data object]\n
+    err_name: [This is the name of the error]\n
+    err_desc: [this is the description of the error]\n
+    err_loc: [this is the location or where the error occurred]\n
+    opt_err: [This is for the optional error like traceback]\n
+    overall_err: [This is a read only overall error or combination of other parameters.
+    Used for less boilerplate code and string builder for all error parameters]"""
 
-# class QueryEngineException(Exception):
-#     """Error happens in Query engine"""
-#     pass
-#
-# class ResourcesInitializedError(QueryEngineException):
-#     """Failed to initialization of the error or api calls"""
-#     pass
+    ok: bool
+    data: Optional[T] = None
+    err_name: str | None = None
+    err_desc: str | None = None
+    err_loc: str | None = None
+    opt_err: Exception | str | None = None
+
+    @property
+    def overall_err(self) -> str:
+        return f"""
+        Error name: {self.err_name}\n
+        Error is: {self.err_desc}\n
+        Error location is: {self.err_loc}\n
+        Optional error traceback: [{self.opt_err}]
+        """
 
 @dataclass(frozen=True)
-class FlowObjectResult:
+class QueryEngineResult(Generic[T]):
+    """
+    ok: [This is if data is Success or Failure]\n
+    data: [This is the data object]\n
+    err_name: [This is the name of the error]\n
+    err_desc: [this is the description of the error]\n
+    err_loc: [this is the location or where the error occurred]\n
+    opt_err: [This is for the optional error like traceback]\n
+    overall_err: [This is a read only overall error or combination of other parameters.
+    Used for less boilerplate code and string builder for all error parameters]"""
+
     ok: bool
-    final_response: Optional[str] = None
-    error: Optional[str] = None
+    data: Optional[T] = None
+    err_name: str | None = None
+    err_desc: str | None = None
+    err_loc: str | None = None
+    opt_err: Exception | str | None = None
 
-
-@dataclass(frozen=True)
-class QueryEngineResult:
-    ok: bool
-    query_response: Optional[str] = None
-    error: Optional[str] = None
-
-# dataclass(frozen=True)
-# class DataResources:
-#     pass
+    @property
+    def overall_err(self) -> str:
+        return f"""
+        Error name: {self.err_name}\n
+        Error is: {self.err_desc}\n
+        Error location is: {self.err_loc}\n
+        Optional error traceback: [{self.opt_err}]
+        """
 
 class FlowState(BaseModel):
     input_user_message: str = ""
     user_message_v1: str = ""
-    user_message_ready_for_llm: str = ""
     output_message: str = ""
-    current_error_message: str = ""
+    save_chat_error: str = ""
+
 
 
 class ChatHistoryQueryEngine(Flow[FlowState]):
@@ -112,23 +142,38 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             return embed_model, llm_for_rag
 
     async def main_query_engine_core(self, input_message: str) -> QueryEngineResult:
-
         async with self._qe_lock:
             result_of_object = await self._vector_class.get_zilliz_vector_result()
 
             #FIRST CONDITIONAL
             if not result_of_object.ok:
-                return QueryEngineResult(ok=False, error=result_of_object.error)
-
+                err_name = "Vector Object Error"
+                err_desc = "Error might occurred in Vector Layer"
+                err_loc = "Chat Query Engine Layer"
+                return QueryEngineResult(
+                    ok=False,
+                    err_name=err_name,
+                    err_desc=err_desc,
+                    err_loc=err_loc,
+                    opt_err=result_of_object.opt_err
+                )
+                # return QueryEngineResult(ok=False, error=result_of_object.overall_err)
             vector_store = result_of_object.data
 
             #SECOND CONDITIONAL
             try:
                 embed_model, llm_for_rag = await self._llm_and_embed_resources()
-            except Exception as e:
-                resources_error = f"""Unexpected Error in initialization of llm and embed:\n
-                Error Type is {type(e)} and error traceback is: {e}"""
-                return QueryEngineResult(ok=False, error=resources_error)
+            except Exception as res_ex:
+                err_name = "Unexpected Error in Flow"
+                err_desc = "Error occurred might be from initialization of resources or cache"
+                err_loc = "Chat Query Engine Layer"
+                return QueryEngineResult(
+                    ok=False,
+                    err_name=err_name,
+                    err_desc=err_desc,
+                    err_loc=err_loc,
+                    opt_err=res_ex
+                )
 
             #THIRD CONDITIONAL
             try:
@@ -142,13 +187,17 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
                     use_async=True,
                 )
                 retrieved_query = await query_engine.aquery(input_message)
-                return QueryEngineResult(ok=True, query_response=retrieved_query.response)
+                return QueryEngineResult(
+                    ok=True, data=retrieved_query.response
+                )
+            except Exception as ex:
+                err_name = "Unexpected Query Engine Failure"
+                err_desc = "Error might be in query engine or along the lines"
+                err_loc = "Chat Query Engine Layer"
+                return QueryEngineResult(
+                    ok=False, err_name=err_name, err_desc=err_desc, err_loc=err_loc, opt_err=ex
+                )
 
-            except (ImportError, MilvusException, AioRpcError, UnboundLocalError) as e1:
-                return QueryEngineResult(ok=False, error=f"Common Error occur: {e1}")
-
-            except Exception as e2:
-                return QueryEngineResult(ok=False, error=f"Unexpected Error for Llama Index: {e2}")
 
     @start()
     def starting_with_prompt(self):
@@ -168,27 +217,28 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
 
 
     @router(starting_with_prompt)
-    async def query_to_vector_with_error_handling(self, data_from_previous):
+    async def query_to_vector_with_error_handling(self):
 
         result = await self.main_query_engine_core(input_message=self.state.user_message_v1)
 
         if result.ok:
-            self.state.output_message = result.query_response
+            self.state.output_message = result.data
             return "QUERY_PASSED"
         else:
-            self.state.output_message = """
-            One or few reasons why no retrieved context or chat history:
-            1. No conversation yet
-            2. No saved chat conversation
-            3. Cleared chat history
-            4. Error in Api calls to vector, embed, and llm"""
-
+            self.state.output_message = result.overall_err
             return "QUERY_FAILED"
+
 
     @listen("QUERY_FAILED")
     def query_failed(self):
-        error = self.state.output_message
-        return FlowObjectResult(ok=False, error=error)
+        opt_err = self.state.output_message
+        err_name = "Query Engine Failed in Class"
+        err_desc = "Error occurred inside flow but not sure of the error"
+        err_loc = "Chat Query Engine (FLOW) Layer"
+        return FlowObjectResult(
+            ok=False, err_name=err_name, err_desc=err_desc, err_loc=err_loc, opt_err=opt_err
+        )
+
 
     @listen("QUERY_PASSED")
     async def query_passed(self):
@@ -197,9 +247,9 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             input_assistant_message=self.state.output_message
         )
         if not result.ok:
-            self.state.current_error_message = result.error
-
+            self.state.save_chat_error = result.error
         return result.ok
+
 
     @router(query_passed)
     def saving_chat_validation(self, _data):
@@ -209,21 +259,21 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
         else:
             return "SAVING_FAILED"
 
+
     @listen("SAVING_PASSED")
     def saving_passed(self):
         output_data = self.state.output_message
-        return FlowObjectResult(ok=True, final_response=output_data)
+        return FlowObjectResult(
+            ok=True, data=output_data
+        )
+
 
     @listen("SAVING_FAILED")
     def saving_failed(self):
-        error = self.state.current_error_message
-        return FlowObjectResult(ok=False, error=error)
-
-
-
-
-
-
-
-
-
+        opt_err = self.state.save_chat_error
+        err_name = "Embedding To Vector Error"
+        err_desc = "Error occurred inside flow but error might be in embed layer"
+        err_loc = "Chat Query Engine (FLOW) Layer"
+        return FlowObjectResult(
+            ok=False, err_name=err_name, err_desc=err_desc, err_loc=err_loc, opt_err=opt_err
+        )

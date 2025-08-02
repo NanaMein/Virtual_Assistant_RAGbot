@@ -54,31 +54,21 @@ from Chatbot_Workflow.RAG.rag_for_chat_conversation.chat_memory_vector import (
 from dataclasses import dataclass
 
 
-T = TypeVar("T")
-
-@dataclass(frozen=True)
-class VectorObjectResult(Generic[T]):
-    """ok: bool\n
-    data: Optional[T] = None[This is the data object]\n
-    err_name: Optional[str] = None[This is the name of the error]\n
-    err_desc: Optional[str] = None[this is the description of the error]\n
-    err_loc: Optional[str] = None[this is the location or where the error occurred]\n
-    opt_err: Optional[str] = None[This is for the optional error like traceback]\n
-    overall_err: @property [This is a read only overall error or combination of other parameters.
-    Used for less boilerplate code and string builder for all error parameters]"""
-
-    ok: bool
-    data: Optional[T] = None
-    err_name: str | None = None
-    err_desc: str | None = None
-    err_loc: str | None = None
-    opt_err: Exception | str | None = None
 load_dotenv()
 
 T = TypeVar("T")
 
 @dataclass(frozen=True)
 class ResourcesResult(Generic[T]):
+    """
+        ok: [This is if data is Success or Failure]\n
+        data: [This is the data object]\n
+        err_name: [This is the name of the error]\n
+        err_desc: [this is the description of the error]\n
+        err_loc: [this is the location or where the error occurred]\n
+        opt_err: [This is for the optional error like traceback]\n
+        overall_err: [This is a read only overall error or combination of other parameters.
+        Used for less boilerplate code and string builder for all error parameters]"""
     ok: bool
     data: Optional[T] = None
     err_name: str | None = None
@@ -198,17 +188,21 @@ class ChatConversationVectorCache:
             try:
                 result: ResourcesResult[DataResources] = await self.resources_with_validation()
                 if not result.ok:
-                    error= f"""This is Embedding layer. Original error is: \n{result.error}"""
-                    return DocumentProcessingResult(ok=False, error=error)
+                    return DocumentProcessingResult(
+                        ok=False,
+                        error=f"""Error: Resources failed to initiate. 
+                        See more information below:\n{result.overall_err}"""
+                    )
 
                 vector_store = result.data.vector_store
                 embed_model = result.data.embed_model
                 llm = result.data.llm_for_rag
 
                 if not input_user_message or not input_assistant_message:
-                    error = """an input message from user and assistant is missing from the parameter"""
-                    return DocumentProcessingResult(ok=False, error=error)
-
+                    return DocumentProcessingResult(
+                        ok=False,
+                        error="""Error: an input message from user and assistant is missing from the parameter"""
+                    )
 
                 user = f"<conversation_turn>role=user content={input_user_message} "
                 assistant = f" role=assistant content={input_assistant_message}</conversation_turn>"
@@ -241,6 +235,6 @@ class ChatConversationVectorCache:
                 await index.ainsert_nodes(nodes=_nodes)
                 return DocumentProcessingResult(ok=True)
 
-            except Exception as e:
-                error = f"Unexpected error in Document processing: {e}"
+            except Exception as ex:
+                error = f"Unexpected error in Document processing: See more information below:\n [{ex}]"
                 return DocumentProcessingResult(ok=False, error=error)

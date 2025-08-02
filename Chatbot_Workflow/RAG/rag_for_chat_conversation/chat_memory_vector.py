@@ -17,13 +17,14 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class VectorObjectResult(Generic[T]):
-    """ok: bool\n
-    data: Optional[T] = None[This is the data object]\n
-    err_name: Optional[str] = None[This is the name of the error]\n
-    err_desc: Optional[str] = None[this is the description of the error]\n
-    err_loc: Optional[str] = None[this is the location or where the error occurred]\n
-    opt_err: Optional[str] = None[This is for the optional error like traceback]\n
-    overall_err: @property [This is a read only overall error or combination of other parameters.
+    """
+    ok: [This is if data is Success or Failure]\n
+    data: [This is the data object]\n
+    err_name: [This is the name of the error]\n
+    err_desc: [this is the description of the error]\n
+    err_loc: [this is the location or where the error occurred]\n
+    opt_err: [This is for the optional error like traceback]\n
+    overall_err: [This is a read only overall error or combination of other parameters.
     Used for less boilerplate code and string builder for all error parameters]"""
 
     ok: bool
