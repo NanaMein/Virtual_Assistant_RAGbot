@@ -1,12 +1,17 @@
 import asyncio
 import os
 from typing import Optional
-
 from groq.types.chat import ChatCompletionMessage
-from langchain.chains.question_answering.map_reduce_prompt import messages
-
 from Chatbot_Workflow.Groq.groq_chat_cache import GroqChatCache
-from groq import AsyncGroq, GroqError
+from groq import (
+AsyncGroq, Groq,
+APIError, GroqError, ConflictError,
+NotFoundError, APIStatusError, RateLimitError,
+APITimeoutError, BadRequestError, APIConnectionError,
+AuthenticationError, InternalServerError,
+PermissionDeniedError, UnprocessableEntityError,
+APIResponseValidationError
+)
 import groq
 from dotenv import load_dotenv
 
@@ -17,7 +22,9 @@ class GroqChatbotCompletions:
 
     def __init__(self, input_user_id: str = ""):
         self.user_id: str = input_user_id
-        self._groq_cache: Optional[GroqChatCache] = None
+        self._groq_cache: GroqChatCache | None = None
+        self.client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
+
 
     @property
     def memory_cache(self) -> GroqChatCache:
@@ -25,26 +32,87 @@ class GroqChatbotCompletions:
             self._groq_cache = GroqChatCache(input_user_id=self.user_id)
         return self._groq_cache
 
-    async def qwen_3_32b_chatbot_with_memory(self, input_message: str):
-        self.memory_cache.add_user_to_memory_cache(user_input_message=input_message)
-        messages = self.memory_cache.get_chat_history_from_memory_cache()
-        client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
-        comp = await client.chat.completions.create(
-            model="qwen/qwen3-32b",
-            messages=messages,
-            temperature=0.7,
-            max_completion_tokens=10351,
-            top_p=0.95,
-            reasoning_effort="default",
-            reasoning_format="parsed",
-            stream=False,
-            stop=None,
-        )
-        msg=await comp.choices[0].message
-        m = await comp.choices[0]
 
-        self.memory_cache.add_assistant_to_memory_cache(assistant_input_message=msg.content)
-        return msg.content
+    async def llama_4_scout_chatbot_with_memory(self, input_message: str) -> str | None:
+        add_msg_result = await self.memory_cache.add_user_message_to_chat(input_message)
+        if not add_msg_result.ok:
+            return None
+
+        get_msg_result = await self.memory_cache.get_all_messages()
+        if not get_msg_result.ok:
+            return None
+
+        _messages = get_msg_result.data
+        try:
+            comp = await self.client.chat.completions.create(
+                # model="qwen/qwen3-32b",
+                messages=_messages,
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                temperature=.7,
+                max_completion_tokens=8000,
+                top_p=0.95,
+                stream=False,
+                stop=None,
+            )
+            groq_object = comp.choices[0].message
+            assistant_message = groq_object.content
+            assistant_result = await self.memory_cache.add_assistant_message_to_chat(assistant_message)
+            if assistant_result.ok:
+                return assistant_message
+            else:
+                return None
+
+        except (APIError, GroqError, ConflictError,
+            NotFoundError, APIStatusError, RateLimitError,
+            APITimeoutError, BadRequestError, APIConnectionError,
+            AuthenticationError, InternalServerError,
+            PermissionDeniedError, UnprocessableEntityError,
+            APIResponseValidationError
+        ) as groq_error:
+            return None
+
+    async def qwen_3_32b_chatbot_with_memory(self, input_message: str) -> str | None:
+        add_msg_result = await self.memory_cache.add_user_message_to_chat(input_message)
+        if not add_msg_result.ok:
+            return None
+
+        get_msg_result = await self.memory_cache.get_all_messages()
+        if not get_msg_result.ok:
+            return None
+        _messages = get_msg_result.data
+
+        # self.memory_cache.add_user_to_memory_cache(user_input_message=input_message)
+        # messages = self.memory_cache.get_chat_history_from_memory_cache()
+        try:
+            comp = await self.client.chat.completions.create(
+                model="qwen/qwen3-32b",
+                messages=_messages,
+                temperature=0.7,
+                max_completion_tokens=10351,
+                top_p=0.95,
+                reasoning_effort="default",
+                reasoning_format="parsed",
+                stream=False,
+                stop=None,
+            )
+            message_object = comp.choices[0].message
+            assistant_message = message_object.content
+            assistant_result = await self.memory_cache.add_assistant_message_to_chat(assistant_message)
+            if assistant_result.ok:
+                return assistant_message
+            else:
+                return None
+
+        except (
+            APIError, GroqError, ConflictError,
+            NotFoundError, APIStatusError, RateLimitError,
+            APITimeoutError, BadRequestError, APIConnectionError,
+            AuthenticationError, InternalServerError,
+            PermissionDeniedError, UnprocessableEntityError,
+            APIResponseValidationError
+            ) as groq_error:
+            return None
+
 
     async def reasoning_llm_qwen3_32b(self,
             user_input: str,
@@ -130,32 +198,39 @@ class GroqChatbotCompletions:
         print(output.model_dump())
         return output
 
-print(os.getenv('CLIENT_GROQ_API_1'))
-obj = GroqChatbotCompletions("what")
-try:
-    input =  "Nice to meet you"
-    result_ = asyncio.run(obj.groq_llama_4_scout(content="hello", role="user"))
-    x = result_.model_dump(include={"role", "content"})
-    print(f"test_model_dump: {x}\ntest_what_type: {type(x)}")
-    result = result_.model_dump(mode="json",exclude_none=True, by_alias=True)
-except groq.GroqError as ge:
-    input = "The error is"
-    result = str(type(ge)) + f"Explain of error: {ge}"
-    print("Second error catch")
-
-except Exception as e:
-    input = "The error is"
-    result = str(type(e)) + f"Explain of error: {e}"
-    print("Third error catch")
 
 
-print(input)
-print(result)
-print(type(result))
-str_na = str(result)
-print(type(str_na))
-print(str_na)
-from pymilvus import MilvusClient, MilvusException
+
+
+
+
+#
+# print(os.getenv('CLIENT_GROQ_API_1'))
+# obj = GroqChatbotCompletions("what")
+# try:
+#     input =  "Nice to meet you"
+#     result_ = asyncio.run(obj.groq_llama_4_scout(content="hello", role="user"))
+#     x = result_.model_dump(include={"role", "content"})
+#     print(f"test_model_dump: {x}\ntest_what_type: {type(x)}")
+#     result = result_.model_dump(mode="json",exclude_none=True, by_alias=True)
+# except groq.GroqError as ge:
+#     input = "The error is"
+#     result = str(type(ge)) + f"Explain of error: {ge}"
+#     print("Second error catch")
+#
+# except Exception as e:
+#     input = "The error is"
+#     result = str(type(e)) + f"Explain of error: {e}"
+#     print("Third error catch")
+#
+#
+# print(input)
+# print(result)
+# print(type(result))
+# str_na = str(result)
+# print(type(str_na))
+# print(str_na)
+# from pymilvus import MilvusClient, MilvusException
 
 # client = MilvusClient(
 #     uri="https://in05-0c3198d45816662.serverless.gcp-us-west1.cloud.zilliz.com",
