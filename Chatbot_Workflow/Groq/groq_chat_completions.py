@@ -12,15 +12,21 @@ AuthenticationError, InternalServerError,
 PermissionDeniedError, UnprocessableEntityError,
 APIResponseValidationError
 )
+from groq.types.chat import (
+ChatCompletionUserMessageParam,
+ChatCompletionAssistantMessageParam,
+ChatCompletionSystemMessageParam
+)
 import groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class GroqChatbotCompletions:
 
 
-    def __init__(self, input_user_id: str = ""):
+    def __init__(self, input_user_id: str):
         self.user_id: str = input_user_id
         self._groq_cache: GroqChatCache | None = None
         self.client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
@@ -71,6 +77,36 @@ class GroqChatbotCompletions:
         ) as groq_error:
             return None
 
+    async def llama_4_scout_chatbot(self, input_message: str) -> str | None:
+
+        try:
+
+            messages = [ChatCompletionUserMessageParam(role="user", content=input_message)]
+            comp = await self.client.chat.completions.create(
+                messages=messages,
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                temperature=.7,
+                max_completion_tokens=8000,
+                top_p=0.95,
+                stream=False,
+                stop=None,
+            )
+            groq_object = comp.choices[0].message
+            assistant_message = groq_object.content
+            return assistant_message
+
+        except (
+            APIError, GroqError, ConflictError,
+            NotFoundError, APIStatusError, RateLimitError,
+            APITimeoutError, BadRequestError, APIConnectionError,
+            AuthenticationError, InternalServerError,
+            PermissionDeniedError, UnprocessableEntityError,
+            APIResponseValidationError
+        ) as groq_error:
+            print(f"Error: {groq_error}\nError Type: {type(groq_error)}")
+            return None
+
+
     async def qwen_3_32b_chatbot_with_memory(self, input_message: str) -> str | None:
         add_msg_result = await self.memory_cache.add_user_message_to_chat(input_message)
         if not add_msg_result.ok:
@@ -113,97 +149,130 @@ class GroqChatbotCompletions:
             ) as groq_error:
             return None
 
+    async def gpt_oss_20b_chatbot_with_memory(self, input_message: str) -> str | None:
+        add_msg_result = await self.memory_cache.add_user_message_to_chat(input_message)
+        if not add_msg_result.ok:
+            return None
 
-    async def reasoning_llm_qwen3_32b(self,
-            user_input: str,
-            sys_prompt_tmpl: str = "",
-            reasoning: bool = False
-        ) -> str:
+        get_msg_result = await self.memory_cache.get_all_messages()
+        if not get_msg_result.ok:
+            return None
 
-        memory = self.memory_cache
+        _messages = get_msg_result.data
+        try:
+            comp = await self.client.chat.completions.create(
 
-        memory.add_user_to_memory_cache(user_input)
-        if not sys_prompt_tmpl:
-            system_prompt = ""
-        else:
-            system_prompt = sys_prompt_tmpl
+                messages=_messages,
+                model="openai/gpt-oss-20b",
+                temperature=.5,
+                max_completion_tokens=20000,
+                top_p=0.95,
+                stream=False,
+                stop=None,
+                reasoning_effort="low",
+                tools=[{"type": "browser_search"}]
+            )
+            groq_object = comp.choices[0].message
+            assistant_message = groq_object.content
+            assistant_result = await self.memory_cache.add_assistant_message_to_chat(assistant_message)
+            if assistant_result.ok:
+                return assistant_message
+            else:
+                return None
 
-        messages = memory.get_chat_with_system_prompt(system_prompt_template=system_prompt)
-
-        if reasoning:
-            reasoning_effort = "default"
-            temperature = 0.6
-            top_p = 0.95
-        else:
-            reasoning_effort = "none"
-            temperature = 0.7
-            top_p = 0.8
-
-        client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
-        comp = await client.chat.completions.create(
-            model="qwen/qwen3-32b",
-            messages=messages,
-            temperature=temperature,
-            max_completion_tokens=10351,
-            top_p=top_p,
-            reasoning_effort=reasoning_effort,
-            reasoning_format="hidden",
-            stream=False,
-            stop=None,
-        )
-        msg = comp.choices[0].message
-        msg_content = msg.content
-        memory.add_assistant_to_memory_cache(msg_content)
-        memory.auto_delete_with_limiter(10)
-
-        return msg_content
+        except (APIError, GroqError, ConflictError,
+            NotFoundError, APIStatusError, RateLimitError,
+            APITimeoutError, BadRequestError, APIConnectionError,
+            AuthenticationError, InternalServerError,
+            PermissionDeniedError, UnprocessableEntityError,
+            APIResponseValidationError
+        ) as groq_error:
+            return None
 
 
-    async def groq_llama_4_scout(
-            self, content: str,
-            role: str ,
-            mixed_messages: list[dict[str,str]] | None = None,
-            temperature: float = 0.7,
-            max_completion_tokens: int = 8000
-    )-> ChatCompletionMessage:
-        """model is: meta-llama/llama-4-scout-17b-16e-instruct
-
-        role: user, assistant, system, hybrid
-
-        """
-        if role in( "user" , "assistant" , "system"):
-            messages = [{"role":role, "content":content}]
-        elif role == "hybrid" and mixed_messages:
-
-            messages = mixed_messages
-        else:
-            raise ValueError("When role is 'hybrid', mixed_messages must be provided.")
-
-        client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
-
-        model = "meta-llama/llama-4-scout-17b-16e-instruct"
-
-        comp = await client.chat.completions.create(
-            # model="qwen/qwen3-32b",
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_completion_tokens=max_completion_tokens,
-            top_p=0.95,
-            stream=False,
-            stop=None,
-        )
-        output = comp.choices[0].message
-        print("Output_model_dump_is: ")
-        print(output.model_dump())
-        return output
-
-
-
-
-
-
-
+    # async def reasoning_llm_qwen3_32b(self,
+    #         user_input: str,
+    #         sys_prompt_tmpl: str = "",
+    #         reasoning: bool = False
+    #     ) -> str:
+    #
+    #     memory = self.memory_cache
+    #
+    #     memory.add_user_to_memory_cache(user_input)
+    #     if not sys_prompt_tmpl:
+    #         system_prompt = ""
+    #     else:
+    #         system_prompt = sys_prompt_tmpl
+    #
+    #     messages = memory.get_chat_with_system_prompt(system_prompt_template=system_prompt)
+    #
+    #     if reasoning:
+    #         reasoning_effort = "default"
+    #         temperature = 0.6
+    #         top_p = 0.95
+    #     else:
+    #         reasoning_effort = "none"
+    #         temperature = 0.7
+    #         top_p = 0.8
+    #
+    #     client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
+    #     comp = await client.chat.completions.create(
+    #         model="qwen/qwen3-32b",
+    #         messages=messages,
+    #         temperature=temperature,
+    #         max_completion_tokens=10351,
+    #         top_p=top_p,
+    #         reasoning_effort=reasoning_effort,
+    #         reasoning_format="hidden",
+    #         stream=False,
+    #         stop=None,
+    #     )
+    #     msg = comp.choices[0].message
+    #     msg_content = msg.content
+    #     memory.add_assistant_to_memory_cache(msg_content)
+    #     memory.auto_delete_with_limiter(10)
+    #
+    #     return msg_content
+    #
+    #
+    # async def groq_llama_4_scout(
+    #         self, content: str,
+    #         role: str ,
+    #         mixed_messages: list[dict[str,str]] | None = None,
+    #         temperature: float = 0.7,
+    #         max_completion_tokens: int = 8000
+    # )-> ChatCompletionMessage:
+    #     """model is: meta-llama/llama-4-scout-17b-16e-instruct
+    #
+    #     role: user, assistant, system, hybrid
+    #
+    #     """
+    #     if role in( "user" , "assistant" , "system"):
+    #         messages = [{"role":role, "content":content}]
+    #     elif role == "hybrid" and mixed_messages:
+    #
+    #         messages = mixed_messages
+    #     else:
+    #         raise ValueError("When role is 'hybrid', mixed_messages must be provided.")
+    #
+    #     client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
+    #
+    #     model = "meta-llama/llama-4-scout-17b-16e-instruct"
+    #
+    #     comp = await client.chat.completions.create(
+    #         # model="qwen/qwen3-32b",
+    #         messages=messages,
+    #         model=model,
+    #         temperature=temperature,
+    #         max_completion_tokens=max_completion_tokens,
+    #         top_p=0.95,
+    #         stream=False,
+    #         stop=None,
+    #     )
+    #     output = comp.choices[0].message
+    #     print("Output_model_dump_is: ")
+    #     print(output.model_dump())
+    #     return output
 #
 # print(os.getenv('CLIENT_GROQ_API_1'))
 # obj = GroqChatbotCompletions("what")
@@ -240,3 +309,13 @@ class GroqChatbotCompletions:
 #     collection_name="Validation_User_ID_Collection",
 #     properties={"collection.ttl.seconds": 300}
 # )
+
+print("Testing run")
+test_object = GroqChatbotCompletions(input_user_id="testing")
+COUNTER: int = 0
+while 5 > COUNTER:
+    input_test = input("\n\nWhat do you want to ask? \n")
+    test_await = asyncio.run(test_object.gpt_oss_20b_chatbot_with_memory(input_test))
+    print(test_await)
+    print(f"COUNTER INDICATOR {COUNTER}")
+    COUNTER = COUNTER+1
