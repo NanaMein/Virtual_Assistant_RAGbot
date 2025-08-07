@@ -110,8 +110,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
 
     def __init__(self, input_user_id: str, **kwargs):
         self.input_user_id: str = input_user_id
-        self._qe_lock = asyncio.Lock()
-        self._res_lock = asyncio.Lock()
+        self._shared_lock = asyncio.Lock()
         self._vector_class = GetMilvusVectorStore(input_user_id=self.input_user_id)
         self.chat_history = ChatConversationVectorCache(user_id=self.input_user_id)
 
@@ -119,7 +118,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
 
 
     async def _llm_and_embed_resources(self) -> Tuple[CohereEmbedding, Llama_Groq]:
-        async with self._res_lock:
+        async with self._shared_lock:
             _cached_resources = self._caching_resources.get(self.input_user_id)
 
             if isinstance(_cached_resources, tuple) and len(_cached_resources) == 2:
@@ -142,7 +141,7 @@ class ChatHistoryQueryEngine(Flow[FlowState]):
             return embed_model, llm_for_rag
 
     async def main_query_engine_core(self, input_message: str) -> QueryEngineResult:
-        async with self._qe_lock:
+        async with self._shared_lock:
             result_of_object = await self._vector_class.get_zilliz_vector_result()
 
             #FIRST CONDITIONAL
