@@ -17,6 +17,7 @@ ChatCompletionUserMessageParam,
 ChatCompletionAssistantMessageParam,
 ChatCompletionSystemMessageParam
 )
+from groq.types.chat.chat_completion_tool_param import ChatCompletionToolParam
 import groq
 from dotenv import load_dotenv
 
@@ -80,7 +81,6 @@ class GroqChatbotCompletions:
     async def llama_4_scout_chatbot(self, input_message: str) -> str | None:
 
         try:
-
             messages = [ChatCompletionUserMessageParam(role="user", content=input_message)]
             comp = await self.client.chat.completions.create(
                 messages=messages,
@@ -133,8 +133,8 @@ class GroqChatbotCompletions:
             )
             message_object = comp.choices[0].message
             assistant_message = message_object.content
-            assistant_result = await self.memory_cache.add_assistant_message_to_chat(assistant_message)
-            if assistant_result.ok:
+            chat_result = await self.memory_cache.add_assistant_message_to_chat(assistant_message)
+            if chat_result.ok:
                 return assistant_message
             else:
                 return None
@@ -149,36 +149,24 @@ class GroqChatbotCompletions:
             ) as groq_error:
             return None
 
-    async def gpt_oss_20b_chatbot_with_memory(self, input_message: str) -> str | None:
-        add_msg_result = await self.memory_cache.add_user_message_to_chat(input_message)
-        if not add_msg_result.ok:
-            return None
-
-        get_msg_result = await self.memory_cache.get_all_messages()
-        if not get_msg_result.ok:
-            return None
-
-        _messages = get_msg_result.data
+    async def gpt_oss_20b_chatbot(self, input_message: str) -> str | None:
         try:
+            messages = [ChatCompletionUserMessageParam(role="user", content=input_message)]
+            tools = [ChatCompletionToolParam(type="browser_search")]
             comp = await self.client.chat.completions.create(
-
-                messages=_messages,
+                messages=messages,
                 model="openai/gpt-oss-20b",
-                temperature=.5,
+                temperature=.4,
                 max_completion_tokens=20000,
                 top_p=0.95,
                 stream=False,
                 stop=None,
-                reasoning_effort="low",
-                tools=[{"type": "browser_search"}]
+                reasoning_effort="medium",
+                tools=tools
             )
             groq_object = comp.choices[0].message
             assistant_message = groq_object.content
-            assistant_result = await self.memory_cache.add_assistant_message_to_chat(assistant_message)
-            if assistant_result.ok:
-                return assistant_message
-            else:
-                return None
+            return assistant_message
 
         except (APIError, GroqError, ConflictError,
             NotFoundError, APIStatusError, RateLimitError,
@@ -315,7 +303,7 @@ test_object = GroqChatbotCompletions(input_user_id="testing")
 COUNTER: int = 0
 while 5 > COUNTER:
     input_test = input("\n\nWhat do you want to ask? \n")
-    test_await = asyncio.run(test_object.gpt_oss_20b_chatbot_with_memory(input_test))
+    test_await = asyncio.run(test_object.gpt_oss_20b_chatbot(input_test))
     print(test_await)
     print(f"COUNTER INDICATOR {COUNTER}")
     COUNTER = COUNTER+1
