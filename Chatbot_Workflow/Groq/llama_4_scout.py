@@ -38,6 +38,7 @@ class LlamaScoutGroqChatCompletions:
         role: user, assistant, system, hybrid
 
         """
+        
         if role in( "user" , "assistant" , "system"):
             messages = [{"role":role, "content":content}]
         elif role == "hybrid" and mixed_messages:
