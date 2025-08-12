@@ -177,52 +177,6 @@ class GroqChatbotCompletions:
         ) as groq_error:
             return None
 
-
-    # async def reasoning_llm_qwen3_32b(self,
-    #         user_input: str,
-    #         sys_prompt_tmpl: str = "",
-    #         reasoning: bool = False
-    #     ) -> str:
-    #
-    #     memory = self.memory_cache
-    #
-    #     memory.add_user_to_memory_cache(user_input)
-    #     if not sys_prompt_tmpl:
-    #         system_prompt = ""
-    #     else:
-    #         system_prompt = sys_prompt_tmpl
-    #
-    #     messages = memory.get_chat_with_system_prompt(system_prompt_template=system_prompt)
-    #
-    #     if reasoning:
-    #         reasoning_effort = "default"
-    #         temperature = 0.6
-    #         top_p = 0.95
-    #     else:
-    #         reasoning_effort = "none"
-    #         temperature = 0.7
-    #         top_p = 0.8
-    #
-    #     client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
-    #     comp = await client.chat.completions.create(
-    #         model="qwen/qwen3-32b",
-    #         messages=messages,
-    #         temperature=temperature,
-    #         max_completion_tokens=10351,
-    #         top_p=top_p,
-    #         reasoning_effort=reasoning_effort,
-    #         reasoning_format="hidden",
-    #         stream=False,
-    #         stop=None,
-    #     )
-    #     msg = comp.choices[0].message
-    #     msg_content = msg.content
-    #     memory.add_assistant_to_memory_cache(msg_content)
-    #     memory.auto_delete_with_limiter(10)
-    #
-    #     return msg_content
-    #
-    #
     # async def groq_llama_4_scout(
     #         self, content: str,
     #         role: str ,
