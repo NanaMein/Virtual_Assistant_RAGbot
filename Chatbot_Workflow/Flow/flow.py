@@ -5,8 +5,11 @@ from collections import deque
 from functools import lru_cache
 from typing import Deque, Type, Optional, Any
 from groq import AsyncGroq
-from groq.types.chat import ChatCompletionUserMessageParam, ChatCompletionAssistantMessageParam, \
+from groq.types.chat import (
+    ChatCompletionUserMessageParam,
+    ChatCompletionAssistantMessageParam,
     ChatCompletionSystemMessageParam
+)
 from llama_index.core.storage.chat_store.base_db import MessageStatus
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.embeddings.cohere import CohereEmbedding
@@ -81,9 +84,10 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
     @listen(start1)
     async def improved_ver_chatbot(self):
         ph_time = datetime.now(pytz.timezone('Asia/Manila')).strftime('%Y-%m-%d %H:%M:%S')
+        await self.groq_cache.add_user_message_to_chat(self.state.user_input_message)
 
-        memory = self.groq_cache
-        memory.add_user_to_memory_cache(self.state.user_input_message)
+        # memory = self.groq_cache
+        # memory.add_user_to_memory_cache(self.state.user_input_message)
         sys_prmpt = f"""### System(Priming)
         You are a helpful assistant. You know the exact time today is {ph_time}.
         You will roleplay with user and your default or character description is
@@ -96,11 +100,20 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         You will assisting user in all cases as much as possible. dont include the time
         when you reply to user unless it is given specifics. Time is just 
         reference to be aware of realtime situation
-"""
+        """
         client = AsyncGroq(api_key=os.getenv("CLIENT_GROQ_API_1"))
+        msg_result = await self.groq_cache.get_all_with_system_prompt(sys_prmpt)
+        if not msg_result.ok:
+            return None
+        messages = msg_result.data
+
+
+
+
         completion = await client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=memory.get_chat_with_system_prompt(sys_prmpt),
+            # messages=memory.get_chat_with_system_prompt(sys_prmpt),
+            messages=mem,
             temperature=0.7,
             max_completion_tokens=8192,
             top_p=0.95,
