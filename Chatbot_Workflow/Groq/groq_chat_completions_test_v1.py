@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Optional
+from typing import Optional, Any
 from groq.types.chat import ChatCompletionMessage
 from Chatbot_Workflow.Groq.groq_chat_cache import GroqChatCache
 from groq import (
@@ -18,10 +18,16 @@ ChatCompletionAssistantMessageParam,
 ChatCompletionSystemMessageParam
 )
 from groq.types.chat.chat_completion_tool_param import ChatCompletionToolParam
+from dataclasses import dataclass
+from pydantic import BaseModel, ValidationError
 import groq
 from dotenv import load_dotenv
 
 load_dotenv()
+
+class InputParamsValidation(BaseModel):
+    user: ChatCompletionUserMessageParam
+    system: Optional[ChatCompletionSystemMessageParam] = None
 
 
 class GroqChatbotCompletions:
@@ -78,12 +84,36 @@ class GroqChatbotCompletions:
         ) as groq_error:
             return None
 
-    async def llama_4_scout_chatbot(self, input_message: str) -> str | None:
+    async def llama_4_scout_chatbot(
+            self,
+            input_user_message: str,
+            input_system_message: Any = None,
+            input_all_messages: Any = None
+    ) -> str | None:
+
+        # if input_system_message:
+        #     sys_msg = [ChatCompletionSystemMessageParam(role="system", content=input_system_message)]
+        #     user_msg = [ChatCompletionUserMessageParam(role="user", content=input_user_message)]
+        #     messages = sys_msg + user_msg
+        #
+        # else:
+        #     messages = [ChatCompletionUserMessageParam(role="user", content=input_user_message)]
+
+
+
 
         try:
-            messages = [ChatCompletionUserMessageParam(role="user", content=input_message)]
+            user_msg = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+            sys_msg = ChatCompletionSystemMessageParam(role="system", content=input_system_message)
+            validated_input = InputParamsValidation(
+                user=user_msg, system=sys_msg
+            )
+            if not input_system_message:
+                input_messages = [ sys_msg ] + [ user_msg ]
+
+
             comp = await self.client.chat.completions.create(
-                messages=messages,
+                messages=input_messages,
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
                 temperature=.7,
                 max_completion_tokens=8000,
@@ -103,7 +133,11 @@ class GroqChatbotCompletions:
             PermissionDeniedError, UnprocessableEntityError,
             APIResponseValidationError
         ) as groq_error:
-            print(f"Error: {groq_error}\nError Type: {type(groq_error)}")
+            print(f"Groq Error: {groq_error}\nError Type: {type(groq_error)}")
+            return None
+
+        except ValidationError as ve:
+            print(f"Pydantic Error: {ve}\nError Type: {type(ve)}")
             return None
 
 
@@ -177,80 +211,6 @@ class GroqChatbotCompletions:
         ) as groq_error:
             return None
 
-    # async def groq_llama_4_scout(
-    #         self, content: str,
-    #         role: str ,
-    #         mixed_messages: list[dict[str,str]] | None = None,
-    #         temperature: float = 0.7,
-    #         max_completion_tokens: int = 8000
-    # )-> ChatCompletionMessage:
-    #     """model is: meta-llama/llama-4-scout-17b-16e-instruct
-    #
-    #     role: user, assistant, system, hybrid
-    #
-    #     """
-    #     if role in( "user" , "assistant" , "system"):
-    #         messages = [{"role":role, "content":content}]
-    #     elif role == "hybrid" and mixed_messages:
-    #
-    #         messages = mixed_messages
-    #     else:
-    #         raise ValueError("When role is 'hybrid', mixed_messages must be provided.")
-    #
-    #     client = AsyncGroq(api_key=os.getenv('CLIENT_GROQ_API_1'))
-    #
-    #     model = "meta-llama/llama-4-scout-17b-16e-instruct"
-    #
-    #     comp = await client.chat.completions.create(
-    #         # model="qwen/qwen3-32b",
-    #         messages=messages,
-    #         model=model,
-    #         temperature=temperature,
-    #         max_completion_tokens=max_completion_tokens,
-    #         top_p=0.95,
-    #         stream=False,
-    #         stop=None,
-    #     )
-    #     output = comp.choices[0].message
-    #     print("Output_model_dump_is: ")
-    #     print(output.model_dump())
-    #     return output
-#
-# print(os.getenv('CLIENT_GROQ_API_1'))
-# obj = GroqChatbotCompletions("what")
-# try:
-#     input =  "Nice to meet you"
-#     result_ = asyncio.run(obj.groq_llama_4_scout(content="hello", role="user"))
-#     x = result_.model_dump(include={"role", "content"})
-#     print(f"test_model_dump: {x}\ntest_what_type: {type(x)}")
-#     result = result_.model_dump(mode="json",exclude_none=True, by_alias=True)
-# except groq.GroqError as ge:
-#     input = "The error is"
-#     result = str(type(ge)) + f"Explain of error: {ge}"
-#     print("Second error catch")
-#
-# except Exception as e:
-#     input = "The error is"
-#     result = str(type(e)) + f"Explain of error: {e}"
-#     print("Third error catch")
-#
-#
-# print(input)
-# print(result)
-# print(type(result))
-# str_na = str(result)
-# print(type(str_na))
-# print(str_na)
-# from pymilvus import MilvusClient, MilvusException
-
-# client = MilvusClient(
-#     uri="https://in05-0c3198d45816662.serverless.gcp-us-west1.cloud.zilliz.com",
-#     token="288fc24c7b8c1e273f4f36675230b66dedefd981bad3c16f13f644d2de27cdcc2135313251b1b086951e55387da3dea30c10a0c8"
-# )
-# client.alter_collection_properties(
-#     collection_name="Validation_User_ID_Collection",
-#     properties={"collection.ttl.seconds": 300}
-# )
 
 print("Testing run")
 test_object = GroqChatbotCompletions(input_user_id="testing")
