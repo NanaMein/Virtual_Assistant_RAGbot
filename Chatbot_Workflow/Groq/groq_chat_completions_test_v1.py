@@ -15,7 +15,8 @@ APIResponseValidationError
 from groq.types.chat import (
 ChatCompletionUserMessageParam,
 ChatCompletionAssistantMessageParam,
-ChatCompletionSystemMessageParam
+ChatCompletionSystemMessageParam,
+ChatCompletionMessage
 )
 from groq.types.chat.chat_completion_tool_param import ChatCompletionToolParam
 from dataclasses import dataclass
@@ -25,9 +26,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+class InputMessageValidator(BaseModel):
+    input_message: str
+
 class InputParamsValidation(BaseModel):
     user: ChatCompletionUserMessageParam
     system: Optional[ChatCompletionSystemMessageParam] = None
+
 
 
 class GroqChatbotCompletions:
@@ -91,18 +96,10 @@ class GroqChatbotCompletions:
             input_all_messages: Any = None
     ) -> str | None:
 
-        # if input_system_message:
-        #     sys_msg = [ChatCompletionSystemMessageParam(role="system", content=input_system_message)]
-        #     user_msg = [ChatCompletionUserMessageParam(role="user", content=input_user_message)]
-        #     messages = sys_msg + user_msg
-        #
-        # else:
-        #     messages = [ChatCompletionUserMessageParam(role="user", content=input_user_message)]
-
-
-
-
         try:
+            _user_message = InputMessageValidator(input_message=input_user_message)
+            _system_message = InputMessageValidator(input_message=input_system_message)
+
             user_msg = ChatCompletionUserMessageParam(role="user", content=input_user_message)
             sys_msg = ChatCompletionSystemMessageParam(role="system", content=input_system_message)
             validated_input = InputParamsValidation(
@@ -110,6 +107,9 @@ class GroqChatbotCompletions:
             )
             if not input_system_message:
                 input_messages = [ sys_msg ] + [ user_msg ]
+
+            elif not input_system_message:
+                input_messages = input_all_messages
 
 
             comp = await self.client.chat.completions.create(
