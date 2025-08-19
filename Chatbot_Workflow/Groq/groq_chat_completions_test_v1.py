@@ -1,7 +1,6 @@
 import asyncio
 import os
 from typing import Optional, Any
-from groq.types.chat import ChatCompletionMessage
 from Chatbot_Workflow.Groq.groq_chat_cache import GroqChatCache
 from groq import (
 AsyncGroq, Groq,
@@ -16,7 +15,7 @@ from groq.types.chat import (
 ChatCompletionUserMessageParam,
 ChatCompletionAssistantMessageParam,
 ChatCompletionSystemMessageParam,
-ChatCompletionMessage
+ChatCompletionMessageParam
 )
 from groq.types.chat.chat_completion_tool_param import ChatCompletionToolParam
 from dataclasses import dataclass
@@ -32,6 +31,9 @@ class InputMessageValidator(BaseModel):
 class InputParamsValidation(BaseModel):
     user: ChatCompletionUserMessageParam
     system: Optional[ChatCompletionSystemMessageParam] = None
+
+class InputAllMessageParamsValidation(BaseModel):
+    messages: list[ChatCompletionMessageParam]
 
 
 
@@ -211,6 +213,140 @@ class GroqChatbotCompletions:
         ) as groq_error:
             return None
 
+
+    async def llama_4_scout_chatbot_TESTING_VERSION1(
+            self,
+            input_user_message: str = None,
+            input_system_message: str = None,
+            input_all_messages: Any = None
+    ) -> str | None:
+
+        try:
+
+            _user_message = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+
+            if input_all_messages:
+                _messages = input_all_messages
+
+            else:
+               if input_system_message:
+                   _system_message = ChatCompletionSystemMessageParam(role="system", content=input_system_message)
+                   _messages = [_system_message] + [_user_message]
+
+               else:
+                   _messages = [_user_message]
+
+            _all = InputAllMessageParamsValidation(messages=_messages)
+
+            comp = await self.client.chat.completions.create(
+                messages=_all.messages,
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                temperature=.7,
+                max_completion_tokens=8000,
+                top_p=0.95,
+                stream=False,
+                stop=None,
+            )
+            groq_object = comp.choices[0].message
+            assistant_message = groq_object.content
+            return assistant_message
+
+        except (
+            APIError, GroqError, ConflictError,
+            NotFoundError, APIStatusError, RateLimitError,
+            APITimeoutError, BadRequestError, APIConnectionError,
+            AuthenticationError, InternalServerError,
+            PermissionDeniedError, UnprocessableEntityError,
+            APIResponseValidationError
+        ) as groq_error:
+            print(f"Groq Error: {groq_error}\nError Type: {type(groq_error)}")
+            return None
+
+        except ValidationError as ve:
+            print(f"Pydantic Error: {ve}\nError Type: {type(ve)}")
+            return None
+
+
+    def input_messages(
+            self,
+            input_user_message: str = None,
+            input_system_message: str = None,
+            input_all_messages: Any = None
+    ):
+        if input_all_messages:
+            try:
+                checked= InputAllMessageParamsValidation(messages=input_all_messages)
+                return checked.messages
+            except ValidationError:
+                return None
+
+        if input_user_message:
+            _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+            _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
+            if input_system_message:
+                valid_list = [_system] + [_user]
+                try:
+                    with_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+                    return with_system_prompt.messages
+                except ValidationError:
+                    return None
+
+            else:
+                valid_list = [_user]
+                try:
+                    without_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+                    return without_system_prompt.messages
+                except ValidationError:
+                    return None
+        return None
+
+    async def llama_4_scout_chatbot_TESTING_VERSION2(
+            self,
+            input_user_message: str = None,
+            input_system_message: str = None,
+            input_all_messages: Any = None
+    ) -> str | None:
+
+        try:
+            if input_user_message:
+                _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+                _mode = 1
+
+            if input_system_message:
+                _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
+                _mode = 2
+
+
+            _system = ChatCompletionSystemMessageParam(role="system", content=input_system_message)
+            validated_messages
+
+            comp = await self.client.chat.completions.create(
+                messages=_all.messages,
+                model="meta-llama/llama-4-scout-17b-16e-instruct",
+                temperature=.7,
+                max_completion_tokens=8000,
+                top_p=0.95,
+                stream=False,
+                stop=None,
+            )
+            groq_object = comp.choices[0].message
+            assistant_message = groq_object.content
+            return assistant_message
+
+        except (
+            APIError, GroqError, ConflictError,
+            NotFoundError, APIStatusError, RateLimitError,
+            APITimeoutError, BadRequestError, APIConnectionError,
+            AuthenticationError, InternalServerError,
+            PermissionDeniedError, UnprocessableEntityError,
+            APIResponseValidationError
+        ) as groq_error:
+            print(f"Groq Error: {groq_error}\nError Type: {type(groq_error)}")
+            return None
+
+        except ValidationError as ve:
+            print(f"Pydantic Error: {ve}\nError Type: {type(ve)}")
+            return None
 
 print("Testing run")
 test_object = GroqChatbotCompletions(input_user_id="testing")
