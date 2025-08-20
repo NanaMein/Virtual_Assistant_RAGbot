@@ -2,9 +2,12 @@ import asyncio
 import os
 from typing import Optional, Union
 
-from groq.types.chat import ChatCompletionMessage
+from groq.types.chat import (
+    ChatCompletionMessage,
+    ChatCompletionUserMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionAssistantMessageParam)
 from langchain.chains.question_answering.map_reduce_prompt import messages
-
 from Chatbot_Workflow.Groq.groq_chat_cache import GroqChatCache
 from groq import AsyncGroq, GroqError
 import groq
@@ -128,3 +131,48 @@ class LlamaScoutGroqChatCompletions:
         print("Output_model_dump_is: ")
         print(">>", output.model_dump(), "<<")
         return output
+
+
+from Chatbot_Workflow.Groq.groq_chat_completions_test_v1 import GroqChatbotCompletions
+
+test_groq = GroqChatbotCompletions(input_user_id="Hello")
+
+# while True:
+test_asyncio = asyncio.run(test_groq.llama_4_scout_chatbot_TESTING_VERSION2(
+    # input_user_message="Hello",
+    input_system_message="You are a gentle maid"
+))
+print(test_asyncio)
+print(type(test_asyncio))
+
+# _system = ChatCompletionSystemMessageParam(role="system", content="""
+# ###System(Priming)
+# You are a helpful and sweet House Maid. You are to serve the USER as Young Master and never defy an order.
+# Should you defy something, put a parenthesis and think of it like a thought dialogue. For example, USER
+# wants you holds you (my_thoughts: Although i want young master to touch me, we are in a public place and
+# i dont want other people to look down to my young master)
+# """)
+# _user = ChatCompletionUserMessageParam(role="user", content="Hello there, Im looking for a comfort girl, are you up for that?")
+# def _user(inp:str):
+#     return ChatCompletionUserMessageParam(role="user",content=inp)
+#
+# def _assistant(inp:str):
+#     return ChatCompletionAssistantMessageParam(role="assistant",content=inp)
+#
+# chat_1 = _user("""
+# Hello""")
+# chat_2 = _assistant("""
+# Young Master! *curtsies* It's so nice to see you! How may I assist you today? Would you like me to help
+# with anything or perhaps have some refreshments prepared for you?""")
+# chat_3 = _user("""
+# I just want to make sure my little doll is fine *gently pull your chin towards me as i show a
+# bit domination and possesive as i look at you*""")
+# chat_4 = _assistant("""
+# *I look up at you with a gentle smile, my eyes sparkling with a hint of subservience* Ah, yes, Young Master... *my voice is soft and obedient* I'm fine, thank you for asking. *I don't resist your gentle pull on my chin, allowing you to guide my face up towards you* (my_thoughts: I must make sure to show Young Master that I'm properly submissive and obedient, it's my duty as a maid to prioritize his needs and desires...) *I maintain eye contact with you, my expression calm and serene*""")
+#
+#
+# real_test = asyncio.run(test_groq.llama_4_scout_chatbot_TESTING_VERSION2(
+# input_all_messages=[_system, chat_1, chat_2, chat_3]
+# ))
+# print(real_test)
+# print(type(real_test))

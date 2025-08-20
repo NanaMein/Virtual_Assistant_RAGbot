@@ -26,10 +26,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class InputMessageValidator(BaseModel):
-    input_message: str
+    message: str
 
 class InputParamsValidation(BaseModel):
-    user: ChatCompletionUserMessageParam
+    user: Optional[ChatCompletionUserMessageParam] = None
     system: Optional[ChatCompletionSystemMessageParam] = None
 
 class InputAllMessageParamsValidation(BaseModel):
@@ -273,12 +273,94 @@ class GroqChatbotCompletions:
             input_system_message: str = None,
             input_all_messages: Any = None
     ):
+
+        #
+        # class InputMessageValidator(BaseModel):
+        #     input_message: str
+        #
+        # class InputParamsValidation(BaseModel):
+        #     user: Optional[ChatCompletionUserMessageParam] = None
+        #     system: Optional[ChatCompletionSystemMessageParam] = None
+        #
+        # class InputAllMessageParamsValidation(BaseModel):
+        #     messages: list[ChatCompletionMessageParam]
+
+
         if input_all_messages:
             try:
                 checked= InputAllMessageParamsValidation(messages=input_all_messages)
                 return checked.messages
             except ValidationError:
                 return None
+
+        if input_user_message:
+            _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+            _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
+            if input_system_message:
+                valid_list = [_system] + [_user]
+                try:
+                    with_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+                    return with_system_prompt.messages
+                except ValidationError:
+                    return None
+
+            else:
+                valid_list = [_user]
+                try:
+                    without_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+                    return without_system_prompt.messages
+                except ValidationError:
+                    return None
+        return None
+
+    def message_validator(
+            self,
+            input_user_message: Any = None,
+            input_system_message: Any = None,
+            input_all_messages: Any = None
+    ):
+
+        #
+        # class InputMessageValidator(BaseModel):
+        #     input_message: str
+        #
+        # class InputParamsValidation(BaseModel):
+        #     user: Optional[ChatCompletionUserMessageParam] = None
+        #     system: Optional[ChatCompletionSystemMessageParam] = None
+        #
+        # class InputAllMessageParamsValidation(BaseModel):
+        #     messages: list[ChatCompletionMessageParam]
+
+        try:
+            input_user = InputMessageValidator(message=input_user_message)
+            input_system = InputMessageValidator(message=input_system_message)
+
+        except ValidationError:
+            return  None
+
+
+        if input_all_messages:
+            try:
+                checked = InputAllMessageParamsValidation(messages=input_all_messages)
+                return checked.messages
+            except ValidationError:
+                return None
+        try:
+            _user = ChatCompletionUserMessageParam(role="user", content=input_user.message)
+            _system = ChatCompletionSystemMessageParam(role='system', content=input_system.message)
+            validated_ = InputParamsValidation(user=_user, system=_system)
+
+            if input_user_message:
+
+                if input_system_message:
+                    message_list = [validated_.system, validated_.user]
+                else:
+                    message_list = [validated_.user]
+
+        except ValidationError:
+            return None
+
+
 
         if input_user_message:
             _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
@@ -308,20 +390,16 @@ class GroqChatbotCompletions:
     ) -> str | None:
 
         try:
-            if input_user_message:
-                _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
-                _mode = 1
-
-            if input_system_message:
-                _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
-                _mode = 2
-
-
-            _system = ChatCompletionSystemMessageParam(role="system", content=input_system_message)
-            validated_messages
+            validated_messages = self.input_messages(
+                input_user_message=input_user_message,
+                input_system_message=input_system_message,
+                input_all_messages=input_all_messages
+            )
+            if not validated_messages:
+                return None
 
             comp = await self.client.chat.completions.create(
-                messages=_all.messages,
+                messages=validated_messages,
                 model="meta-llama/llama-4-scout-17b-16e-instruct",
                 temperature=.7,
                 max_completion_tokens=8000,
@@ -347,13 +425,3 @@ class GroqChatbotCompletions:
         except ValidationError as ve:
             print(f"Pydantic Error: {ve}\nError Type: {type(ve)}")
             return None
-
-print("Testing run")
-test_object = GroqChatbotCompletions(input_user_id="testing")
-COUNTER: int = 0
-while 5 > COUNTER:
-    input_test = input("\n\nWhat do you want to ask? \n")
-    test_await = asyncio.run(test_object.gpt_oss_20b_chatbot(input_test))
-    print(test_await)
-    print(f"COUNTER INDICATOR {COUNTER}")
-    COUNTER = COUNTER+1
