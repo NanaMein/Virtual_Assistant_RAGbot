@@ -140,7 +140,7 @@ test_groq = GroqChatbotCompletions(input_user_id="Hello")
 # while True:
 test_asyncio = asyncio.run(test_groq.llama_4_scout_chatbot_TESTING_VERSION2(
     # input_user_message="Hello",
-    input_system_message="You are a gentle maid"
+    # input_system_message="You are a gentle maid"
 ))
 print(test_asyncio)
 print(type(test_asyncio))

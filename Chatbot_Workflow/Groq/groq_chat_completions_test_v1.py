@@ -313,7 +313,7 @@ class GroqChatbotCompletions:
                     return None
         return None
 
-    def message_validator(
+    def input_message_validator(
             self,
             input_user_message: Any = None,
             input_system_message: Any = None,
@@ -331,23 +331,35 @@ class GroqChatbotCompletions:
         # class InputAllMessageParamsValidation(BaseModel):
         #     messages: list[ChatCompletionMessageParam]
 
-        try:
-            input_user = InputMessageValidator(message=input_user_message)
-            input_system = InputMessageValidator(message=input_system_message)
-
-        except ValidationError:
-            return  None
-
-
         if input_all_messages:
             try:
                 checked = InputAllMessageParamsValidation(messages=input_all_messages)
                 return checked.messages
-            except ValidationError:
+            except ValidationError as ve2:
+                print(f"Validation Error: {ve2}")
                 return None
+
+        else:
+            print("No list of message")
+            pass
+
         try:
+            input_user = InputMessageValidator(message=input_user_message)
+            input_system = InputMessageValidator(message=input_system_message)
+
+        except ValidationError as ve1:
+            print(f"Validation Error: {ve1}")
+            return  None
+
+
+
+        try:
+            input_user = InputMessageValidator(message=input_user_message)
+            input_system = InputMessageValidator(message=input_system_message)
+
             _user = ChatCompletionUserMessageParam(role="user", content=input_user.message)
             _system = ChatCompletionSystemMessageParam(role='system', content=input_system.message)
+
             validated_ = InputParamsValidation(user=_user, system=_system)
 
             if input_user_message:
@@ -359,6 +371,11 @@ class GroqChatbotCompletions:
 
         except ValidationError:
             return None
+
+        except Exception as ex:
+            print(f"Unexpected Error: {ex}")
+            return None
+
 
 
 
@@ -380,6 +397,8 @@ class GroqChatbotCompletions:
                     return without_system_prompt.messages
                 except ValidationError:
                     return None
+
+
         return None
 
     async def llama_4_scout_chatbot_TESTING_VERSION2(
@@ -395,8 +414,8 @@ class GroqChatbotCompletions:
                 input_system_message=input_system_message,
                 input_all_messages=input_all_messages
             )
-            if not validated_messages:
-                return None
+            # if not validated_messages:
+            #     return None
 
             comp = await self.client.chat.completions.create(
                 messages=validated_messages,
