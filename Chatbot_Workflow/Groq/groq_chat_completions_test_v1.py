@@ -343,13 +343,13 @@ class GroqChatbotCompletions:
             print("No list of message")
             pass
 
-        try:
-            input_user = InputMessageValidator(message=input_user_message)
-            input_system = InputMessageValidator(message=input_system_message)
-
-        except ValidationError as ve1:
-            print(f"Validation Error: {ve1}")
-            return  None
+        # try:
+        #     input_user = InputMessageValidator(message=input_user_message)
+        #     input_system = InputMessageValidator(message=input_system_message)
+        #
+        # except ValidationError as ve1:
+        #     print(f"Validation Error: {ve1}")
+        #     return  None
 
 
 
