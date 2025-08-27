@@ -285,33 +285,39 @@ class GroqChatbotCompletions:
         # class InputAllMessageParamsValidation(BaseModel):
         #     messages: list[ChatCompletionMessageParam]
 
-
-        if input_all_messages:
-            try:
-                checked= InputAllMessageParamsValidation(messages=input_all_messages)
-                return checked.messages
-            except ValidationError:
-                return None
-
-        if input_user_message:
-            _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
-            _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
-            if input_system_message:
-                valid_list = [_system] + [_user]
+        try:
+            if input_all_messages:
                 try:
-                    with_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
-                    return with_system_prompt.messages
+                    checked= InputAllMessageParamsValidation(messages=input_all_messages)
+                    return checked.messages
                 except ValidationError:
                     return None
 
-            else:
-                valid_list = [_user]
-                try:
-                    without_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
-                    return without_system_prompt.messages
-                except ValidationError:
-                    return None
-        return None
+            if input_user_message:
+                _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+
+                if input_system_message:
+                    _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
+
+                    valid_list = [_system] + [_user]
+                    try:
+                        with_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+                        return with_system_prompt.messages
+                    except ValidationError:
+                        return None
+
+                else:
+                    valid_list = [_user]
+                    try:
+                        without_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+                        return without_system_prompt.messages
+                    except ValidationError:
+                        return None
+            return None
+
+
+        except Exception as ex:
+            print(f"Unexpected Error occurred: {ex}")
 
     def input_message_validator(
             self,
@@ -343,31 +349,22 @@ class GroqChatbotCompletions:
             print("No list of message")
             pass
 
-        # try:
-        #     input_user = InputMessageValidator(message=input_user_message)
-        #     input_system = InputMessageValidator(message=input_system_message)
-        #
-        # except ValidationError as ve1:
-        #     print(f"Validation Error: {ve1}")
-        #     return  None
-
-
 
         try:
-            input_user = InputMessageValidator(message=input_user_message)
-            input_system = InputMessageValidator(message=input_system_message)
 
-            _user = ChatCompletionUserMessageParam(role="user", content=input_user.message)
-            _system = ChatCompletionSystemMessageParam(role='system', content=input_system.message)
+            _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+            _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
 
             validated_ = InputParamsValidation(user=_user, system=_system)
 
             if input_user_message:
 
                 if input_system_message:
-                    message_list = [validated_.system, validated_.user]
+                    return [validated_.system, validated_.user]
                 else:
-                    message_list = [validated_.user]
+                    return [validated_.user]
+
+            # return message_list
 
         except ValidationError:
             return None
@@ -379,27 +376,27 @@ class GroqChatbotCompletions:
 
 
 
-        if input_user_message:
-            _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
-            _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
-            if input_system_message:
-                valid_list = [_system] + [_user]
-                try:
-                    with_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
-                    return with_system_prompt.messages
-                except ValidationError:
-                    return None
-
-            else:
-                valid_list = [_user]
-                try:
-                    without_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
-                    return without_system_prompt.messages
-                except ValidationError:
-                    return None
-
-
-        return None
+        # if input_user_message:
+        #     _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
+        #     _system = ChatCompletionSystemMessageParam(role='system', content=input_system_message)
+        #     if input_system_message:
+        #         valid_list = [_system] + [_user]
+        #         try:
+        #             with_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+        #             return with_system_prompt.messages
+        #         except ValidationError:
+        #             return None
+        #
+        #     else:
+        #         valid_list = [_user]
+        #         try:
+        #             without_system_prompt = InputAllMessageParamsValidation(messages=valid_list)
+        #             return without_system_prompt.messages
+        #         except ValidationError:
+        #             return None
+        #
+        #
+        # return None
 
     async def llama_4_scout_chatbot_TESTING_VERSION2(
             self,
@@ -409,7 +406,7 @@ class GroqChatbotCompletions:
     ) -> str | None:
 
         try:
-            validated_messages = self.input_messages(
+            validated_messages = self.input_message_validator(
                 input_user_message=input_user_message,
                 input_system_message=input_system_message,
                 input_all_messages=input_all_messages
