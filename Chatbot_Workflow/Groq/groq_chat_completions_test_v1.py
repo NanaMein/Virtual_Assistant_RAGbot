@@ -35,6 +35,10 @@ class InputParamsValidation(BaseModel):
 class InputAllMessageParamsValidation(BaseModel):
     messages: list[ChatCompletionMessageParam]
 
+@dataclass(frozen=True)
+class ParamsObject:
+    user: ChatCompletionUserMessageParam
+    system: Optional[ChatCompletionSystemMessageParam] = None
 
 
 class GroqChatbotCompletions:
@@ -294,6 +298,7 @@ class GroqChatbotCompletions:
                     return None
 
             if input_user_message:
+                # _object = ParamsObject(user=input_user_message, system=input_system_message)
                 _user = ChatCompletionUserMessageParam(role="user", content=input_user_message)
 
                 if input_system_message:
