@@ -18,8 +18,8 @@ load_dotenv()
 
 
 
-def ttl_in_hours(how_many_hour: float):
-    ttl = 3600 * how_many_hour
+def ttl_in_hours(in_hours: float):
+    ttl = 3600 * in_hours
     return ttl
 
 T = TypeVar("T")
@@ -70,8 +70,10 @@ class GroqChatCache:
             )
             memory.append(user_msg_ready)
             return MessageResult(ok=True)
+
         except (KeyError, ValueError, AttributeError, TypeError) as norm_err:
             return MessageResult(ok=False, error_description=norm_err)
+
         except Exception as ex:
             return MessageResult(ok=False, error_description=ex)
 
@@ -84,8 +86,10 @@ class GroqChatCache:
             )
             memory.append(assist_msg_ready)
             return MessageResult(ok=True)
+
         except (KeyError, ValueError, AttributeError, TypeError) as norm_err:
             return MessageResult(ok=False, error_description=norm_err)
+
         except Exception as ex:
             return MessageResult(ok=False, error_description=ex)
 
@@ -95,6 +99,7 @@ class GroqChatCache:
             new_list = [] + orig_list
             # return new_list
             return MessageResult(ok=True, data=new_list)
+
         except Exception as ex:
             return MessageResult(ok=False, error_description=ex)
 
@@ -110,6 +115,7 @@ class GroqChatCache:
 
             system_and_chat = [system_prompt] + orig_chat
             return MessageResult(ok=True, data=system_and_chat)
+
         except Exception as ex:
             return MessageResult(ok=False, error_description=ex)
 
