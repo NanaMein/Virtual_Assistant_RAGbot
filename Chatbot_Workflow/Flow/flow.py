@@ -109,43 +109,63 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
 
 
 
-
-        completion = await client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            # messages=memory.get_chat_with_system_prompt(sys_prmpt),
-            messages=mem,
-            temperature=0.7,
-            max_completion_tokens=8192,
-            top_p=0.95,
-            stream=False,
-            stop=None,
+        chat_response = await self.groq_chat_completions.llama_4_scout_chatbot(
+            input_all_messages=messages
         )
-        chat = completion.choices[0].message
-        chat_response = chat.content
+        # completion = await client.chat.completions.create(
+        #     model="meta-llama/llama-4-scout-17b-16e-instruct",
+        #     # messages=memory.get_chat_with_system_prompt(sys_prmpt),
+        #     messages=mem,
+        #     temperature=0.7,
+        #     max_completion_tokens=8192,
+        #     top_p=0.95,
+        #     stream=False,
+        #     stop=None,
+        # )
+        # chat = completion.choices[0].message
+        # chat_response = chat.content
+
+        await self.groq_cache.add_user_message_to_chat(chat_response)
 
 
-        memory.add_assistant_to_memory_cache(chat_response)
+        # memory_len = memory.get_chat_history_from_memory_cache()
 
-        memory_len = memory.get_chat_history_from_memory_cache()
+        memory_len = await self.groq_cache.get_all_messages()
 
         print(f"Number of Memory Stack: {len(memory_len)}")
 
-        new_memory_len = memory.auto_delete_with_limiter(10)
-
+        # new_memory_len = memory.auto_delete_with_limiter(10)
+        new_memory_len = await self.groq_cache.setting_limit_to_messages(10)
 
         print(f"The number of stack now is: {new_memory_len}")
         return chat_response, sys_prmpt
 
+    # @listen(improved_ver_chatbot)
+    # async def testing_llm_groq_chat_comp(self, data_from_improve_ver):
+    #     chat_from_scout, system_prompt = data_from_improve_ver
+    #     groq_obj = self.groq_chat_completions
+    #     chat_from_qwen = await groq_obj.reasoning_llm_qwen3_32b(
+    #         user_input=self.state.user_input_message,
+    #         sys_prompt_tmpl=system_prompt,
+    #         reasoning=False
+    #     )
+    #     return chat_from_scout, chat_from_qwen
+
     @listen(improved_ver_chatbot)
-    async def testing_llm_groq_chat_comp(self, data_from_improve_ver):
+    async def testing_llm_groq_chat_comp_TESTING(self, data_from_improve_ver):
         chat_from_scout, system_prompt = data_from_improve_ver
-        groq_obj = self.groq_chat_completions
-        chat_from_qwen = await groq_obj.reasoning_llm_qwen3_32b(
-            user_input=self.state.user_input_message,
-            sys_prompt_tmpl=system_prompt,
-            reasoning=False
+        #
+        # groq_obj = self.groq_chat_completions
+        # chat_from_qwen = await groq_obj.reasoning_llm_qwen3_32b(
+        #     user_input=self.state.user_input_message,
+        #     sys_prompt_tmpl=system_prompt,
+        #     reasoning=False
+        # )
+        # return chat_from_scout, chat_from_qwen
+        await self.groq_chat_completions.qwen_3_32b_chatbot(
+            input_system_message=system_prompt,
+            input_user_message=self.state.user_input_message
         )
-        return chat_from_scout, chat_from_qwen
 
 
 
