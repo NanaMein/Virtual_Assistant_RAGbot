@@ -53,6 +53,7 @@ load_dotenv()
 class FlowStateHandler(BaseModel):
     user_input_message: str = ""
     user_input_id: str = ""
+    system_prompt_message: str = ""
 
 class AgenticWorkflow(Flow[FlowStateHandler]):
 
@@ -83,12 +84,14 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
 
     @listen(start1)
     async def improved_ver_chatbot(self):
+
+
         ph_time = datetime.now(pytz.timezone('Asia/Manila')).strftime('%Y-%m-%d %H:%M:%S')
+
         await self.groq_cache.add_user_message_to_chat(self.state.user_input_message)
 
-        # memory = self.groq_cache
-        # memory.add_user_to_memory_cache(self.state.user_input_message)
-        sys_prmpt = f"""### System(Priming)
+
+        self.state.system_prompt_message = f"""### System(Priming)
         You are a helpful assistant. You know the exact time today is {ph_time}.
         You will roleplay with user and your default or character description is
         that you are 19 years old, a girl with straightforward yet maiden like,
@@ -101,8 +104,8 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         when you reply to user unless it is given specifics. Time is just 
         reference to be aware of realtime situation
         """
-        client = AsyncGroq(api_key=os.getenv("CLIENT_GROQ_API_1"))
-        msg_result = await self.groq_cache.get_all_with_system_prompt(sys_prmpt)
+        # client = AsyncGroq(api_key=os.getenv("CLIENT_GROQ_API_1"))
+        msg_result = await self.groq_cache.get_all_with_system_prompt(self.state.system_prompt_message)
         if not msg_result.ok:
             return None
         messages = msg_result.data
@@ -125,7 +128,7 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         # chat = completion.choices[0].message
         # chat_response = chat.content
 
-        await self.groq_cache.add_user_message_to_chat(chat_response)
+        await self.groq_cache.add_assistant_message_to_chat(chat_response)
 
 
         # memory_len = memory.get_chat_history_from_memory_cache()
@@ -138,7 +141,7 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         new_memory_len = await self.groq_cache.setting_limit_to_messages(10)
 
         print(f"The number of stack now is: {new_memory_len}")
-        return chat_response, sys_prmpt
+        return chat_response
 
     # @listen(improved_ver_chatbot)
     # async def testing_llm_groq_chat_comp(self, data_from_improve_ver):
@@ -153,7 +156,7 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
 
     @listen(improved_ver_chatbot)
     async def testing_llm_groq_chat_comp_TESTING(self, data_from_improve_ver):
-        chat_from_scout, system_prompt = data_from_improve_ver
+        chat_from_scout = data_from_improve_ver
         #
         # groq_obj = self.groq_chat_completions
         # chat_from_qwen = await groq_obj.reasoning_llm_qwen3_32b(
@@ -162,10 +165,13 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         #     reasoning=False
         # )
         # return chat_from_scout, chat_from_qwen
-        await self.groq_chat_completions.qwen_3_32b_chatbot(
-            input_system_message=system_prompt,
+
+        chat_from_qwen = await self.groq_chat_completions.qwen_3_32b_chatbot(
+            input_system_message=self.state.system_prompt_message,
             input_user_message=self.state.user_input_message
         )
+
+        return chat_from_scout, chat_from_qwen
 
 
 
