@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+print("GROQ CHAT COMPLETION IS RUNNING")
 class InputParamsValidation(BaseModel):
     user: Optional[ChatCompletionUserMessageParam] = None
     system: Optional[ChatCompletionSystemMessageParam] = None
@@ -187,6 +188,7 @@ class GroqChatbotCompletions:
                 input_all_messages=input_all_messages
             )
             if validated_messages is None:
+                print("Validation Failed")
                 return None
 
             comp = await self.client.chat.completions.create(

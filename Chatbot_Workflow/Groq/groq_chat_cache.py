@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
-
+print("GROQ CHAT CACHE IS RUNNING")
 
 
 def ttl_in_hours(in_hours: float):
