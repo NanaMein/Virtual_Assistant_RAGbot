@@ -113,14 +113,7 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
     @listen(improved_ver_chatbot)
     async def testing_llm_groq_chat_comp_TESTING(self, data_from_improve_ver):
         chat_from_scout = data_from_improve_ver
-        #
-        # groq_obj = self.groq_chat_completions
-        # chat_from_qwen = await groq_obj.reasoning_llm_qwen3_32b(
-        #     user_input=self.state.user_input_message,
-        #     sys_prompt_tmpl=system_prompt,
-        #     reasoning=False
-        # )
-        # return chat_from_scout, chat_from_qwen
+ 
 
         chat_from_qwen = await self.groq_chat_completions.qwen_3_32b_chatbot(
             input_system_message=self.state.system_prompt_message,
