@@ -31,6 +31,7 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
 
     def __init__(self, **kwargs):
         self._groq_cache: Optional[GroqChatCache] = None
+        self._test_groq_cache: Optional[GroqChatCache] = None
         self._groq_chats: Optional[GroqChatbotCompletions] = None
         super().__init__(**kwargs)
 
@@ -45,6 +46,13 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         if self._groq_chats is None:
             self._groq_chats = GroqChatbotCompletions(input_user_id=self.state.user_input_id)
         return self._groq_chats
+
+    @property
+    def test_groq_cache(self) -> GroqChatCache:
+        if self._test_groq_cache is None:
+            new_input = self.state.user_input_id + "_2025"
+            self._test_groq_cache = GroqChatCache(input_user_id=new_input)
+        return self._test_groq_cache
 
     @start()
     async def start1(self):
@@ -75,6 +83,7 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
         msg_result = await self.groq_cache.get_all_with_system_prompt(self.state.system_prompt_message)
         if not msg_result.ok:
             return None
+
         messages = msg_result.data
         print(f"THESE ARE THE MESSAGE CONTENT TO LLAMA 4: {messages} \n MESSAGE TYPE IS: {type(messages)}")
         chat_response = await self.groq_chat_completions.llama_4_scout_chatbot(
@@ -113,12 +122,26 @@ class AgenticWorkflow(Flow[FlowStateHandler]):
     @listen(improved_ver_chatbot)
     async def testing_llm_groq_chat_comp_TESTING(self, data_from_improve_ver):
         chat_from_scout = data_from_improve_ver
- 
+
+        # chat_from_qwen = await self.groq_chat_completions.qwen_3_32b_chatbot(
+        #     input_system_message=self.state.system_prompt_message,
+        #     input_user_message=self.state.user_input_message
+        # )
+        await self.test_groq_cache.add_user_message_to_chat(
+            user_input_message=self.state.user_input_message
+        )
+
+        get_all_with_system = await self.test_groq_cache.get_all_with_system_prompt(
+            system_prompt_template=self.state.system_prompt_message
+        )
+
+        if not get_all_with_system:
+            return None, None
 
         chat_from_qwen = await self.groq_chat_completions.qwen_3_32b_chatbot(
-            input_system_message=self.state.system_prompt_message,
-            input_user_message=self.state.user_input_message
+            input_all_messages=get_all_with_system.data
         )
+        await self.test_groq_cache.add_assistant_message_to_chat(chat_from_qwen)
 
         return chat_from_scout, chat_from_qwen
 
